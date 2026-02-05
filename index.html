@@ -1,0 +1,4840 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Abbreviation Decoder</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            text-align: center;
+            margin: 50px;
+            background-color: #f5f5f7;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 16px;
+            box-shadow: 0px 4px 10px rgba(0, 0, 0, 0.1);
+            max-width: 400px;
+            margin: auto;
+        }
+        .fixed-footnote{
+            position: fixed;
+            left: 0; right: 0; bottom: 0;      /* use left+right instead of width:100% */
+            box-sizing: border-box;
+            display: flex;                      /* exact centering */
+            justify-content: center;
+            align-items: center;
+
+            padding: 10px calc(12px + env(safe-area-inset-right))
+                    10px calc(12px + env(safe-area-inset-left)); /* iPhone notches/edges */
+            background: #f9f9f9;
+            border-top: 1px solid #e5e5ea;
+            font: 500 13px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            color: #8e8e93;
+            z-index: 9999;
+
+            transition: opacity .2s ease, transform .2s ease, visibility .2s;
+            opacity: 1; visibility: visible; transform: translateY(0);
+            }
+            .fixed-footnote.is-hidden{
+            opacity: 0; visibility: hidden; transform: translateY(6px);
+            pointer-events: none;
+            }
+        input {
+            font-size: 18px;
+            padding: 12px;
+            width: calc(100% - 24px);
+            border: 1px solid #d1d1d6;
+            border-radius: 12px;
+            outline: none;
+            transition: all 0.2s ease-in-out;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        input:focus {
+            border-color: #007aff;
+            box-shadow: 0px 0px 8px rgba(0, 122, 255, 0.3);
+        }
+        button {
+            font-size: 18px;
+            padding: 12px;
+            border: none;
+            border-radius: 12px;
+            background: #007aff;
+            color: white;
+            cursor: pointer;
+            width: calc(100% - 24px);
+            margin-top: 10px;
+            transition: background 0.2s;
+            box-sizing: border-box;
+        }
+        button:hover {
+            background: #005ecb;
+        }
+        #output {
+            margin-top: 20px;
+            font-size: 20px;
+            font-weight: bold;
+            color: #333;
+        }
+        :root {
+            --system-blue: #007aff;
+            --footnote-bg: #f9f9f9;
+            --footnote-border: #e5e5ea;
+            --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+        }
+        .info-btn-bottom {
+            position: fixed;
+            bottom: 50px; /* space above the footnote bar */
+            left: 50%;
+            transform: translateX(-50%);
+            background: transparent !important;
+            border: none;
+            cursor: pointer;
+            font: 600 16px/1 var(--ui);
+            color: #8e8e93; /* Apple-style gray */
+            padding: 8px 10px;
+            border-radius: 12px;
+            transition: background-color .15s ease, opacity .15s ease;
+            width: auto !important;
+            z-index: 10000;
+        }
+        .info-btn-bottom:hover { background: rgba(142, 142, 147, 0.08); } /* lighter gray hover */
+        .info-btn-bottom:active { opacity: .85; }
+        .info-btn-bottom:focus-visible {
+            outline: 2px solid rgba(142, 142, 147, 0.45);
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Info button (bottom center) -->
+<button
+  id="infoBtn"
+  class="info-btn-bottom"
+  type="button"
+  aria-controls="footnote"
+  aria-expanded="false"
+  onclick="toggleInfo()"
+>
+  Info
+</button>
+
+    <!-- Time bar (visible by default) -->
+    <div id="timeBar" class="fixed-footnote" style="
+    background: transparent;      /* no background */
+    border-top: none;             /* no border */
+    color: #8e8e93;               /* Apple-style gray */
+    ">
+    <span id="timeDisplay" style="font-weight: 500; font-size: 13px;">Loading time...</span>
+    </div>
+
+    <!-- Footnote (hidden by default) -->
+    <div id="footnote" class="fixed-footnote is-hidden">
+      Decodes Most METAR, TAF, Chart Supplement, and General Abbreviations
+    </div>
+
+    <h2>Abbreviation Decoder</h2>
+    <input type="text" id="abbreviation" placeholder="Enter abbreviation" onkeydown="checkEnter(event)">
+    <button onclick="decodeMETARCode()">Decode</button>
+    <p id="output"></p>
+
+    <script>
+const abbreviations = {
+  "-": "Light",
+  "/FL": "Flight Level Or Altitude (Pirep)",
+  "/IC": "Icing (Pirep)",
+  "/OV": "Over (Location Of Pirep)",
+  "/RM": "Remarks (Pirep)",
+  "/SK": "Sky Cover (Pirep)",
+  "/TA": "Ambient Temperature (Pirep)",
+  "/TB": "Turbulence (Pirep)",
+  "/TM": "Time Pirep Received",
+  "/TP": "Type Plane/aircraft (Pirep)",
+  "/WV": "Wind Velocity (Pirep)",
+  "/WX": "Weather (Pirep)",
+  "+": "Heavy",
+  "+FC": "Well-Developed Funnel Cloud / Tornado or Waterspout",
+  "=": "End of METAR",
+  "$": "Maintenance needed on the system",
+  "A": "Hail",
+  "A-G": "Arresting Gear",
+  "A-GEAR": "Arresting Gear",
+  "A/A": "Air To Air",
+  "A/G": "air/ground",
+  "A01": "Automated Observation without Precipitation Discrimination",
+  "A02": "Automated Observation with Precipitation Discrimination",
+  "A3000": "Altimeter Setting 30.00\\\"",
+  "AAF": "Army Air Field",
+  "AAL": "Above Aerodrome Level",
+  "AAR": "Air-to-Air Refueling",
+  "AAS": "Airport Advisory Service",
+  "AATM": "At All Times",
+  "AAWF": "Auxiliary Aviation Weather Facility",
+  "AB": "Airbase",
+  "ABD": "Aboard",
+  "abm": "abeam",
+  "ABn": "Aerodrome Beacon",
+  "ABNDT": "Abundant",
+  "ABNML": "Abnormal",
+  "ABT": "About",
+  "ABV": "Above",
+  "AC": "Altocumulus",
+  "ACA": "Artic Control Area",
+  "ACARS": "Aircraft Communication Addressing & Reporting System",
+  "ACAS": "Airborne Collision Avoidance System",
+  "ACC": "Air Combat Command Area Control Center or Area Control Center or Altocumulus Castellanus (cloud type)",
+  "ACCAS": "Altocumulus Castellanus",
+  "ACCUM": "Accumulate",
+  "ACFT": "Aircraft",
+  "ACK": "Acknowledge",
+  "ACL": "Altimeter Check Location",
+  "ACLD": "Above Clouds",
+  "ACLS": "Automatic Carrier Landing System",
+  "ACLT": "Accelerate",
+  "ACN": "Aircraft Classification Number",
+  "ACPT": "Accept",
+  "ACR": "Air Carrier or Aircraft Classification Rating",
+  "ACRBT": "Acrobatic",
+  "ACRS": "Across",
+  "ACSL": "Standing Lenticular Altocumulus",
+  "ACT": "Active or Activated or Activity",
+  "ACTG": "Acting",
+  "ACTV": "Active",
+  "ACTVT": "Activate",
+  "ACWS": "Aircraft Control and Warning Squadron",
+  "ACYC": "Anticyclonic",
+  "AD": "Aerodrome",
+  "ADA": "Advisory Area",
+  "ADC": "Air Data Computer",
+  "ADCC": "Air Defense Control Center",
+  "ADCUS": "Advise Customs",
+  "ADDN": "Addition",
+  "ADF": "Automatic Direction Finder",
+  "ADI": "Attitude Director Indicator",
+  "ADIZ": "Air Defense Identification Zone",
+  "ADJ": "Adjacent",
+  "admin": "administration",
+  "ADQT": "Adequate",
+  "ADR": "Advisory Route",
+  "ADRNDCK": "Adirondack",
+  "ADV": "Advise",
+  "ADVCTN": "Advection",
+  "ADVN": "Advance",
+  "advs": "advise",
+  "advsy": "advisory",
+  "ADVY": "Advisory",
+  "ADVZY": "Advisory",
+  "ADZD": "Advised",
+  "AEIS": "Aeronautical Enroute Information Service",
+  "AER": "approach end rwy",
+  "AERADIO": "Air Radio",
+  "AERO": "Aerodrome",
+  "AFA": "Army Flight Activity",
+  "AFB": "Air Force Base",
+  "AFC": "Area Forecast Center",
+  "AFCT": "Affect",
+  "AFD": "Airport/Facility Directory",
+  "AFDK": "After Dark",
+  "AFF": "Army Air Field",
+  "AFFF": "Aqueous Film Forming Foam",
+  "AFHP": "Air Force Heliport",
+  "AFIS": "Automatic Flight Information Service",
+  "afld": "airfield",
+  "AFN": "American Forces Network",
+  "AFOD": "Army Flight Operations Detachment",
+  "AFR": "Air Force Regulation",
+  "AFRC": "Armed Forces Reserve Center/Air Force Reserve Command",
+  "AFRS": "American Forces Radio Stations",
+  "AFS": "Air Force Station",
+  "AFSS": "Automated Flight Service Station",
+  "AFT": "After",
+  "AFTN": "Afternoon or Aeronautical Fixed Telecommunication Network",
+  "AG": "Agriculture",
+  "agcy": "Agency",
+  "AGL": "Above Ground Level",
+  "AH": "Alert Height",
+  "AHD": "Ahead",
+  "AHP": "Army heliport",
+  "AID": "Airport Information Desk",
+  "AIM": "Aeronautical Information Manual",
+  "AIP": "Aeronautical Information Publication",
+  "AIREP": "Air-report",
+  "AIRMET": "Airmen's Meteorological Information",
+  "AIS": "Aeronautical Information Services",
+  "AISR": "Aeronautical Information System Replacement",
+  "AL": "Approach and Landing Chart",
+  "ALA": "Authorized Landing Area",
+  "ALDARS": "Automated Lightning Detection and Reporting System",
+  "ALF": "Aloft or Auxiliary Landing Field",
+  "ALG": "Along",
+  "ALGHNY": "Allegheny",
+  "ALNMT": "Alignment",
+  "ALQDS": "All Quadrants",
+  "ALS": "Approach Light System",
+  "ALSEC": "All Sectors",
+  "ALSF": "Approach Light System with Sequenced Flashing Lights",
+  "ALSF-1": "Standard 2400' High-Intensity Approach Lighting System with Sequenced Flashers (Category I Configuration)",
+  "ALSF-2": "Standard 2400' High-Intensity Approach Lighting System with Sequenced Flashers (Category II Configuration)",
+  "ALSTG": "Altimeter Setting",
+  "ALT": "Altitude",
+  "ALTA": "Alberta",
+  "ALTM": "Altimeter",
+  "ALTN": "Alternate",
+  "ALTNLY": "Alternately",
+  "ALUTN": "Aleutian",
+  "ALWF": "Actual Wind Factor",
+  "AM": "Ante Meridiem or Amplitude Modulation, midnight til noon",
+  "AMA": "Area Minimum Altitude",
+  "AMC": "Air Mobility Command",
+  "AMD": "Amended Forecast",
+  "AMDT": "Amendment",
+  "AMGR": "Airport Manager",
+  "AMOS": "Automatic Meteorological Observing System",
+  "AMS": "Air Mass",
+  "AMSL": "Above Mean Sea Level",
+  "ANCPT": "Anticipate",
+  "ANGB": "Air National Guard Base",
+  "ANGS": "Air National Guard Station",
+  "ANLYS": "Analysis",
+  "ant": "antenna",
+  "AO1": "ASOS Automated Observation without Precipitation Discriminator (Rain/Snow)",
+  "AO2": "ASOS Automated Observation with Precipitation Discriminator (Rain/Snow)",
+  "AOA": "At or Above",
+  "AOB": "At or Below",
+  "AOE": "Airport/Aerodrome of Entry",
+  "AOMC": "ASOS Operations and Monitoring Center",
+  "AP": "Anomalous Propagation or Area Planning",
+  "AP LGT": "Airport Lights",
+  "APAPI": "Abbreviated Precision Approach Path Indicator",
+  "APC": "Area Positive Control",
+  "APCH": "Approach",
+  "APL": "Airport Lights",
+  "APLCN": "Appalachian",
+  "APN": "Apron",
+  "APP": "Approach Control",
+  "Apr": "April",
+  "APRNT": "Apparent",
+  "APROP": "Appropriate",
+  "APRX": "Approximate",
+  "APT": "Airport",
+  "APU": "Auxiliary Power Unit",
+  "apv": "approve",
+  "apvl": "approval",
+  "ARB": "Air Reserve Base",
+  "ARFF": "Aircraft Rescue and Fire Fighting",
+  "ARFOR": "Area Forecast",
+  "ARINC": "Aeronautical Radio Incorporated (inc.)",
+  "ARND": "Around",
+  "arng": "arrange",
+  "ARO": "Airport Reporting Officer",
+  "arpt": "airport",
+  "arr": "arrive",
+  "ARS": "Air Reserve Station",
+  "ARSA": "Airport Radar Service Area",
+  "ARSR": "Air Route Surveillance Radar",
+  "ARTC": "Air Route Traffic Control",
+  "ARTCC": "Air Route Traffic Control Center",
+  "AS": "Altostratus or Air Station",
+  "ASAP": "As Soon As Possible",
+  "ASDA": "Accelerate-Stop Distance Available",
+  "ASDE": "Airport Surface Detection",
+  "ASDE-X": "Airport Surface Detection Equipment-Model X",
+  "asgn": "assign",
+  "ASI": "Airspeed Indicator or Altimeter Setting Indicator",
+  "ASL": "Above Sea Level",
+  "ASOS": "Automated Surface Observing System",
+  "ASPH": "Asphalt",
+  "ASR": "Airport Surveillance Radar",
+  "ASSC": "Airport Surface Surveillance Capability",
+  "ASU": "Aircraft Starting Unit",
+  "AT AP": "At Airport",
+  "ATA": "Actual Time of Arrival",
+  "ATC": "Air Traffic Control",
+  "ATCAA": "Air Traffic Control Assigned Airspace",
+  "ATCC": "Air Traffic Control Center",
+  "ATCS": "Air Traffic Control Specialist",
+  "ATCSCC": "Air Traffic Control System Command Center",
+  "ATCT": "Air Traffic Control Tower",
+  "ATD": "Actual Time of Departure Along Track Distance",
+  "ATF": "Airport Traffic Frequency",
+  "ATFM": "Air Traffic Flow Management",
+  "ATIS": "Automatic Terminal Information Service",
+  "ATLC": "Atlantic",
+  "ATS": "Air Traffic Services",
+  "attn": "attention",
+  "ATZ": "Airport Traffic Zone",
+  "Aug": "August",
+  "AURBO": "Aurora Borealis",
+  "AUTH": "Authorized or Authority",
+  "AUTO": "Automated Report (without Human Editing) or Automatic",
+  "AUTOB": "Automatic Weather Reporting System",
+  "AUW": "All-Up Weight or Aircraft Gross Weight — the total weight of the aircraft at any given time, including fuel, passengers, cargo, and crew",
+  "aux": "auxiliary",
+  "AVASI": "abbreviated VASI",
+  "avbl": "available",
+  "AVG": "Average",
+  "AVGAS": "Aviation Gasoline",
+  "avn": "aviation",
+  "AvOil": "aviation oil",
+  "AWACS": "Airborne Warning and Control System",
+  "AWIB": "Airport Weather Information Broadcast",
+  "AWOS": "Automatic Weather Observing System",
+  "AWP": "Aviation Weather Processors",
+  "AWSS": "Automated Weather Sensor System",
+  "awt": "await",
+  "AWY": "Airway",
+  "az": "azimuth",
+  "AZM": "Azimuth",
+  "B": "Began",
+  "BA": "braking action",
+  "BA FAIR": "Braking Action Fair",
+  "BA NIL": "Braking Action Nil",
+  "BA POOR": "Braking Action Poor",
+  "BACLIN": "Baroclinic",
+  "BAJA": "Baja California",
+  "BAK-12": "Aircraft arresting barrier system using cable engagement or Arresting gear (cable)",
+  "BAK-14": "Aircraft arresting barrier system with retractable hook cable or Arresting gear (retractable cable)",
+  "BASH": "Bird Aircraft Strike Hazard",
+  "BATROP": "Barotropic",
+  "BC": "Patches or back course",
+  "BCFG": "Patchy Fog (Metar)",
+  "BCH": "Beach",
+  "BCKG": "Backing",
+  "BCM": "Become",
+  "BCMG": "Becoming",
+  "BCMS": "Becomes",
+  "bcn": "beacon",
+  "BCOB": "Broken Clouds Or Better",
+  "bcst": "broadcast",
+  "BD": "Blowing Dust",
+  "BDA": "Bermuda",
+  "BDRY": "Boundary",
+  "BECMG": "Becoming (e.g., BECMG 0002 = becoming between 00 to 02 Zulu)",
+  "BERM": "Snowbank/s Containing Earth/gravel",
+  "BEW": "Basic Empty Weight — standard empty weight plus optional and special equipment installed on the aircraft",
+  "BFDK": "Before Dark",
+  "BFR": "Before",
+  "BGN": "Begin",
+  "BGNG": "Beginning",
+  "BGNS": "Begins",
+  "BHND": "Behind",
+  "BINOVC": "Breaks in Overcast",
+  "BKN": "Broken Cloud Layer (5/8ths to 7/8ths coverage)",
+  "BL": "Blowing",
+  "BLD": "Build",
+  "BLDG": "Building",
+  "BLDS": "Builds",
+  "BLDU": "Blowing Dust (Metar)",
+  "BLDUP": "Buildup",
+  "blkd": "blocked",
+  "BLKHLS": "Black Hills",
+  "BLKT": "Blanket",
+  "BLKTG": "Blanketing",
+  "BLKTS": "Blankets",
+  "BLO": "Below",
+  "BLSA": "Blowing Sand (Metar)",
+  "BLSN": "Blowing Snow (Metar)",
+  "blw": "below",
+  "BLZD": "Blizzard",
+  "BM": "Back Marker",
+  "BMS": "Basic Meteorological Services",
+  "BN": "Blowing Sand",
+  "BND": "Bound",
+  "BNDRY": "Boundary",
+  "BNDRYS": "Boundaries",
+  "BNTH": "Beneath",
+  "BOOTHEEL": "Bootheel",
+  "BOQ": "Bachelor Officers Quarters",
+  "BOVC": "Bovc",
+  "BR": "Mist (≥5/8 mile visibility)",
+  "BRB": "Be Right Back",
+  "BRF": "Brief",
+  "BRG": "Branching or bearing",
+  "BRK": "Break",
+  "BRKG": "Breaking",
+  "BRKHIC": "Breaks in Higher Clouds",
+  "BRKS": "Breaks",
+  "BRKSHR": "Berkshire",
+  "BRKSHRS": "Berkshires",
+  "BRM": "Barometer",
+  "BRS": "Branches",
+  "BS": "Blowing Snow",
+  "BTL": "Between Layers",
+  "btn": "between",
+  "BTWN": "Between",
+  "bus": "business",
+  "BY": "Blowing Spray",
+  "BYD": "Beyond",
+  "C": "Celsius or Commercial Circuit (Telephone) or Celsius, Center (With Reference to Runway Designation)",
+  "CA": "Cloud-Air Lightning",
+  "CAA": "Cold Air Advection",
+  "CAAS": "Class A Airspace",
+  "CAC": "Centralized Approach Control",
+  "CADIZ": "Canadian Air Defense Identification Zone",
+  "CAN": "Canada",
+  "cap": "capacity",
+  "CARIB": "Caribbean",
+  "CARS": "Community Airport Radio Station",
+  "CASCDS": "Cascades",
+  "CAT": "category or Clear Air Turbulence",
+  "CAVOK": "Ceiling and Visibility OK",
+  "CAVU": "Ceiling and Visibility Unlimited",
+  "CAWS": "Common Aviation Weather Sub-System",
+  "CB": "Cumulonimbus Cloud",
+  "CBAS": "Class B Airspace",
+  "CBMAM": "Cumulonimbus Mammatus",
+  "CBS": "Cumulonimbi",
+  "CBSA": "Class B Surface Area",
+  "CC": "Cirrocumulus or Cloud-Cloud Lightning",
+  "CCAS": "Class C Airspace",
+  "CCLDS": "Clear of Clouds",
+  "CCLKWS": "Counter-Clockwise",
+  "CCSA": "Class C Surface Area",
+  "CCSL": "Standing Lenticular Cirrocumulus",
+  "CCW or cntclkws": "counterclockwise",
+  "CD": "Clearance Delivery",
+  "CDA": "Continuous Descent Approach",
+  "CDAS": "Class D Airspace",
+  "CDFNT": "Cold Front",
+  "CDFNTL": "Cold Frontal",
+  "CDI": "Course Deviation Indicator",
+  "CDSA": "Class D Surface Area",
+  "CDT": "Central Daylight Time",
+  "CEAS": "Class E Airspace",
+  "ceil": "ceiling",
+  "CERAP": "Center Radar Approach Control",
+  "CESA": "Class E Surface Area",
+  "CFIT": "Controlled Flight Into Terrain",
+  "CFP": "Cold Front Passage",
+  "CFR": "Code of Federal Regulations",
+  "CG": "Coast Guard or Cloud-Ground Lightning",
+  "CGAF": "Coast Guard Air Facility",
+  "CGAS": "Coast Guard Air Station",
+  "CGL": "Circling Guidance Lights",
+  "CH": "channel",
+  "chan": "channel",
+  "CHAPI": "Chase Helicopter Approach Path Indicator",
+  "CHARC": "Characteristic",
+  "CHC": "Chance",
+  "CHCS": "Chances",
+  "CHG": "Change",
+  "CHGD": "Changed",
+  "CHGG": "Changing",
+  "CHGS": "Changes",
+  "CHI": "Cloud-Height Indicator",
+  "CHINO": "Sky Condition at Secondary Location Not Available",
+  "CHSPK": "Chesapeake",
+  "cht": "chart",
+  "CI": "Cirrus",
+  "CIG": "Ceiling",
+  "CIGS": "Ceilings",
+  "cir": "circle, circling",
+  "CIV": "Civil, civil, civilian",
+  "ck": "check",
+  "CL": "Centerline Lighting System",
+  "CLD": "Cloud",
+  "CLDNS": "Cloudiness",
+  "CLDS": "Clouds",
+  "CLKWS": "Clockwise",
+  "clnc": "clearance",
+  "CLR": "Sky Clear at or Below 12,000 AGL or No Clouds Detected at, or Below, Design Limit of Ceilometer (Automated System)",
+  "CLRG": "Clearing",
+  "CLRS": "Clears",
+  "clsd": "closed",
+  "CMB": "Climb",
+  "CMNPS": "Canadian Minimum Navigation Performance Specification",
+  "CMPLX": "Complex",
+  "CMSND": "Commissioned",
+  "CNATRA": "Chief of Naval Air Training",
+  "CNCL": "Cancel",
+  "CNCLD": "Cancelled",
+  "CNCLG": "Cancelling",
+  "CNCLS": "Cancels",
+  "CNDN": "Canadian",
+  "CNF": "Computer Navigation Fix",
+  "CNFDC": "Confidence",
+  "cnl": "cancel",
+  "CNTR": "Center",
+  "CNTRD": "Centered",
+  "CNTRL": "Central",
+  "CNTRLN": "Centerline",
+  "CNTRS": "Centers",
+  "CNTY": "County",
+  "CNTYS": "Counties",
+  "CNVG": "Converge",
+  "CNVGG": "Converging",
+  "CNVGNC": "Convergence",
+  "CNVTN": "Convection",
+  "CNVTV": "Convective",
+  "CNVTVLY": "Convectively",
+  "CO": "Colorado or Company, County or Commanding Officer",
+  "com": "communication",
+  "comd": "command",
+  "Comdr": "Commander",
+  "coml": "commercial",
+  "COMLO": "Compass Locator",
+  "COMM": "Communications",
+  "COMPAR": "Compare",
+  "COMPARD": "Compared",
+  "COMPARG": "Comparing",
+  "COMPARS": "Compares",
+  "compul": "compulsory",
+  "comsn": "commission",
+  "conc": "concrete",
+  "COND": "Conditions",
+  "CONFDC": "Confidence",
+  "CONS": "Continuous",
+  "const": "construction",
+  "CONT": "Continue",
+  "CONTD": "Continued",
+  "CONTDVD": "Continental Divide",
+  "CONTG": "Continuing",
+  "CONTLY": "Continually",
+  "CONTRAILS": "Condensation Trails",
+  "CONTS": "Continues",
+  "CONUS": "Continental United States",
+  "convl": "conventional",
+  "COORD": "Coordinate",
+  "COP": "Change Over Point",
+  "copter": "helicopter",
+  "COR": "Correction or Correction to a Previously Disseminated Report",
+  "corr": "correct",
+  "CP": "Command Post",
+  "CPBL": "Capable",
+  "CPD": "Coupled",
+  "CPDLC": "Controller Pilot Data Link Communication",
+  "CPT": "Clearance-pre-taxi Procedure",
+  "CRC": "Circle",
+  "CRCLC": "Circulate",
+  "CRCLN": "Circulation",
+  "crdr": "corridor",
+  "CRNR": "Corner",
+  "CRNRS": "Corners",
+  "cros": "cross",
+  "CRP": "Compulsory Reporting Point",
+  "CRS": "Course",
+  "CS": "Cirrostratus or call sign",
+  "CSAR": "Combat Search and Rescue",
+  "CSDR": "Consider",
+  "CSDRBL": "Considerable",
+  "CST": "Coast",
+  "CSTL": "Coastal",
+  "CSTMS": "Customs",
+  "CT": "Connecticut",
+  "CTA": "Control Area",
+  "CTAF": "Common Traffic Advisory Frequency",
+  "ctc": "contact",
+  "CTGY": "Category",
+  "ctl": "control",
+  "CTLZ": "Control Zone",
+  "ctn": "caution",
+  "CTR": "Control Zone",
+  "CTSKLS": "Catskills",
+  "CU": "Cumulus",
+  "CUFRA": "Cumulus Fractus",
+  "CVFR": "Controlled Visual Flight Rules Areas",
+  "CVR": "Cover",
+  "CVRD": "Covered",
+  "CVRG": "Covering",
+  "CVRS": "Covers",
+  "CW": "Clockwise, Continuous Wave, Carrier Wave",
+  "CYC": "Cyclonic",
+  "CYCLGN": "Cyclogenesis",
+  "D": "Day",
+  "D-ATIS": "Digital Automatic Terminal Information Service",
+  "DA": "Density Altitude",
+  "DABRK": "Daybreak",
+  "DALGT": "daylight",
+  "DASI": "Digital Altimeter Setting Indicator",
+  "daylt": "daylight",
+  "db": "decibel",
+  "DBL": "Double",
+  "DC": "District of Columbia",
+  "DCAVU": "Clear/scattered Clouds. Visibility Greater Than 10, Remainder Of Report Missing",
+  "DCL": "Departure Clearance",
+  "DCR": "Decrease",
+  "DCRD": "Decreased",
+  "DCRG": "Decreasing",
+  "DCRGLY": "Decreasingly",
+  "DCRS": "Decreases",
+  "DCT": "Direct Route",
+  "DE": "Delaware",
+  "Dec": "December",
+  "DECMSND": "Decommissioned",
+  "decom": "decommission",
+  "DEG": "Degree",
+  "DEGS": "Degrees",
+  "del": "delivery",
+  "DELMARVA": "Delaware-Maryland-Virginia",
+  "DEP": "depart or Departure Control",
+  "DEP PROC": "Departure Procedure",
+  "DER": "Departure End Of Runway",
+  "destn": "destination",
+  "det": "detachment",
+  "DEWIZ": "Distance Early Warning Identification Zone",
+  "DF": "Direction Finder",
+  "DFCLT": "Difficult",
+  "DFCLTY": "Difficulty",
+  "DFNT": "Definite",
+  "DFNTLY": "Definitely",
+  "DFRS": "Differs",
+  "DFUS": "Diffuse",
+  "DGNL": "Diagonal",
+  "DGNLLY": "Diagonally",
+  "DH": "Decision Height",
+  "DIAP": "DoD Instrument Approach Procedure",
+  "DIGG": "Digging",
+  "DIR": "Direction",
+  "direc": "directional",
+  "DISABLD": "Disabled",
+  "DISC": "Discontinue",
+  "DISCD": "Discontinued",
+  "DISCG": "Discontinuing",
+  "disem": "disseminate",
+  "displ": "displace",
+  "DISPL THRESH": "Displaced Threshold",
+  "DISRE": "Disregard",
+  "DISRED": "Disregarded",
+  "DISREG": "Disregarding",
+  "dist": "district, distance",
+  "div": "division",
+  "DKTS": "Dakotas",
+  "DL": "Direct Line to FSS",
+  "DLA": "Delay",
+  "DLAD": "Delayed",
+  "DLT": "Delete",
+  "DLTD": "Deleted",
+  "DLTG": "Deleting",
+  "DLY": "Daily",
+  "DME": "Distance Measuring Equipment",
+  "DMG": "Damage",
+  "DMGD": "Damaged",
+  "DMGG": "Damaging",
+  "DMNT": "Dominant",
+  "DMSH": "Diminish",
+  "DMSHD": "Diminished",
+  "DMSHG": "Diminishing",
+  "DMSHS": "Diminishes",
+  "DMSTN": "Demonstraition",
+  "DNDFTS": "Downdrafts",
+  "DNS": "Dense",
+  "DNSLP": "Downslope",
+  "DNSTRM": "Downstream",
+  "DNVT": "Digital Non-Secure Voice Telephone",
+  "DNWND": "Down Wind",
+  "DOC": "Department of Commerce",
+  "DOD": "Department of Defense",
+  "DOM": "Domestic",
+  "DOT": "Department of Transportation",
+  "DP": "Deep",
+  "DPND": "Deepened",
+  "DPNG": "Deepening",
+  "DPNS": "Deepens",
+  "DPR": "Deeper",
+  "DPTH": "Depth",
+  "DR": "Low Drifting",
+  "drct": "direct",
+  "DRFT": "Drift",
+  "DRFTD": "Drifted",
+  "DRFTG": "Drifting",
+  "DRFTS": "Drifts",
+  "DRSA": "Low Drifting Sand (Metar)",
+  "DRSN": "Low Drifting Snow (Metar)",
+  "DRZL": "Drizzle",
+  "DS": "Dust Storm",
+  "DSCNT": "Descent",
+  "DSIPT": "Dissipate",
+  "DSIPTD": "Dissipated",
+  "DSIPTG": "Dissipating",
+  "DSIPTN": "Dissipation",
+  "DSIPTS": "Dissipates",
+  "DSN": "Defense Switching Network (Telephone)",
+  "DSND": "Descend",
+  "DSNDG": "Descending",
+  "DSNDS": "Descends",
+  "DSNT": "Distant Weather Phenomenon or Distant",
+  "dsplcd": "displaced",
+  "DSTBLZ": "Destabilize",
+  "DSTBLZD": "Destabilized",
+  "DSTBLZG": "Destabilizing",
+  "DSTBLZN": "Destabilization",
+  "DSTBLZS": "Destabilizes",
+  "DSTC": "Distance",
+  "DT": "Daylight Savings Time",
+  "DTLN": "International Dateline",
+  "DTRT": "Deteriorate",
+  "DTRTD": "Deteriorated",
+  "DTRTG": "Deteriorating",
+  "DTRTS": "Deteriorates",
+  "DTWL": "Dual Tandem Wheel Load (max weight in lbs)",
+  "DU": "Dust or Widespread Dust",
+  "DUAL": "Dual Wheel Load (max weight in lbs)",
+  "dur": "during",
+  "DURC": "During Climb (Pirep)",
+  "DURD": "During Decent (Pirep)",
+  "DURG": "During",
+  "DURN": "Duration",
+  "DV": "Distinguished Visitor",
+  "DVLP": "Develop",
+  "DVLPD": "Developed",
+  "DVLPG": "Developing",
+  "DVLPMT": "Development",
+  "DVLPS": "Develops",
+  "DVRG": "Diverge",
+  "DVRGG": "Diverging",
+  "DVRGNC": "Divergence",
+  "DVRGS": "Diverges",
+  "DVV": "Downward Vertical Velocity",
+  "DWNDFTS": "Downdrafts",
+  "DWNDRTS": "Downdrafts",
+  "DWPNT": "Dewpoint",
+  "DWPNTS": "Dewpoints",
+  "DX": "Duplex",
+  "DZ": "Drizzle",
+  "E": "Ended or East",
+  "E-HA": "Enroute High Altitude",
+  "E-LA": "Enroute Low Altitude",
+  "E-S": "Enroute Supplement",
+  "ea": "each",
+  "EADI": "Electronic Attitude Director Indicator",
+  "EAT": "Expected Approach Time",
+  "EB": "Eastbound",
+  "EBND": "East Bound",
+  "ECN": "Enroute Change Notice",
+  "EDT": "Eastern Daylight Time",
+  "EET": "Estimated Elapsed Time",
+  "EFAS": "Enroute Flight Advisory Service",
+  "EFC": "Expect Further Clearance",
+  "EFCT": "Effect",
+  "eff": "effective, effect",
+  "EFVS": "Enhanced Flight Vision Systems",
+  "EICAS": "Engine Indicating and Crew Alerting System",
+  "elev": "elevation",
+  "ELNGT": "Elongate",
+  "ELNGTD": "Elongated",
+  "ELSW": "Elsewhere",
+  "ELT": "Emergency Locator Transmitter",
+  "EMAS": "Engineered Material Arresting System",
+  "EMBD": "Embedded",
+  "EMBDD": "Embedded",
+  "EMERG": "Emergency",
+  "EMSU": "Environment Meteorological Support Unit",
+  "ENCTR": "Encounter",
+  "ENDG": "Ending",
+  "ENE": "East-Northeast",
+  "ENELY": "East-Northeasterly",
+  "ENERN": "East-Northeastern",
+  "ENEWD": "East-Northeastward",
+  "eng": "engine",
+  "ENHNC": "Enhance",
+  "ENHNCD": "Enhanced",
+  "ENHNCG": "Enhancing",
+  "ENHNCMNT": "Enhancement",
+  "ENHNCS": "Enhances",
+  "ENRT": "En Route",
+  "ENTR": "Entire",
+  "EOBT": "Estimated Off Block Time",
+  "EOF": "Expected Operations Forecast",
+  "EOR": "End of Runway",
+  "eqpt": "equipment",
+  "ERDA": "Energy Research and Development Administration",
+  "ERN": "Eastern",
+  "ERY": "Early",
+  "ERYR": "Earlier",
+  "ESE": "East-Southeast",
+  "ESELY": "East-Southeasterly",
+  "ESERN": "East-Southeastern",
+  "ESEWD": "East-Southeastward",
+  "ESNTL": "Essential",
+  "est": "estimate",
+  "ESTAB": "Establish",
+  "ESTS": "Estimates",
+  "ETA": "Estimated Time of Arrival",
+  "ETC": "Et Cetera",
+  "ETD": "Estimated Time of Departure",
+  "ETE": "Estimated Time Enroute",
+  "ETIM": "Elapsed Time",
+  "ETOPS": "Extended Range Operation With Two Engine Airplanes",
+  "ETS": "European Telephone System",
+  "EUR": "European (ICAO Region)",
+  "ev": "every",
+  "evac": "evacuate",
+  "EVE": "Evening",
+  "EWD": "Eastward",
+  "exc": "except",
+  "excld": "exclude",
+  "EXCLV": "Exclusive",
+  "EXCLVLY": "Exclusively",
+  "EXCP": "Except",
+  "exer": "exercise",
+  "exm": "exempt",
+  "exp": "expect",
+  "EXPC": "Expect",
+  "EXPCD": "Expected",
+  "EXPCG": "Expecting",
+  "EXTD": "Extend",
+  "EXTDD": "Extended",
+  "EXTDG": "Extending",
+  "EXTDS": "Extends",
+  "EXTN": "Extension",
+  "EXTRAP": "Extrapolate",
+  "EXTRAPD": "Extrapolated",
+  "EXTREME TURB": "Extreme Turbulence",
+  "EXTRM": "Extreme",
+  "EXTRMLY": "Extremely",
+  "EXTSV": "Extensive",
+  "extv": "extensive",
+  "F": "Fahrenheit",
+  "F/W": "Fixed Wing",
+  "FA": "Aviation Area Forecast",
+  "FAA": "Federal Aviation Administration",
+  "fac": "facility",
+  "FAF": "Final Approach Fix",
+  "FAH": "Fahrenheit",
+  "FAM": "Familiar",
+  "FAN MKR": "Fan Marker",
+  "FAP": "Final Approach Point",
+  "FAR": "Federal Aviation Regulations",
+  "FAWS": "Flight Advisory Weather Service",
+  "fax": "facsimile",
+  "FBO": "Fixed Base Operator",
+  "FC": "Funnel Cloud",
+  "FCC": "Flight Control Center",
+  "FCG": "Foreign Clearance Guide",
+  "FCLP": "field carrier landing practice",
+  "FCP": "Final Control Point",
+  "FCST": "Forecast",
+  "FCSTD": "Forecasted",
+  "FCSTG": "Forecasting",
+  "FCSTR": "Forecaster",
+  "FCSTS": "Forecasts",
+  "FDC": "Flight Data Center",
+  "FDR": "Flight Data Recorder",
+  "Feb": "February",
+  "FEW": "Few Cloud Layer (0/8ths to 2/8ths coverage)",
+  "FG": "Fog",
+  "FI/P": "Flight Inspection Permanent",
+  "FI/T": "Flight Inspection Temporary",
+  "FIBI": "Filed But Impracticable to Transmit",
+  "FIC": "Flight Information Center",
+  "FIG": "Figure",
+  "FIH": "Flight Information Handbook",
+  "FILG": "Filling",
+  "FINO": "Weather Report Will Not Be Filed For Transmission /Fl Altitude/flight Level (Pirep)",
+  "FIR": "Flight Information Region",
+  "FIRAV": "First Available",
+  "FIS": "Flight Information Service",
+  "FL": "Flight Level",
+  "fld": "field",
+  "FLDST": "Flood Stage",
+  "FLG": "Falling or flashing",
+  "FLIP": "Flight Information Publication",
+  "FLRY": "Flurry",
+  "FLRYS": "Flurries",
+  "FLT": "Flight",
+  "FLUNKN": "Flight Level(pirep)unknown",
+  "FLW": "Follow",
+  "FLWG": "Following",
+  "FLWIS": "Flood Warning Issued",
+  "FM": "From (e.g., FM0200 = from 0200 Zulu) or Fan Marker, Frequency Modulation",
+  "FMH-1": "Federal Meteorological Handbook No.1, Surface Weather Observations and Reports",
+  "FMS": "Flight Management System",
+  "FMT": "Format",
+  "FNA": "Final Approach",
+  "FNCTN": "Function",
+  "FNL": "Final Approach",
+  "FNT": "Front",
+  "FNTGNS": "Frontogenesis",
+  "FNTL": "Frontal",
+  "FNTLYS": "Frontolysis",
+  "FNTS": "Fronts",
+  "FOC": "Flight Operations Center",
+  "FOD": "Foreign Object Damage",
+  "fone": "telephone",
+  "FOQA": "Flight Operational Quality Assurance",
+  "FORNN": "Forenoon",
+  "FPL": "Flight Plan",
+  "FPM": "Feet Per Minute",
+  "FQT": "Frequent",
+  "FQTLY": "Frequently",
+  "fr": "from",
+  "freq": "frequency, frequent",
+  "FRH": "Fly Runway Heading",
+  "FRI": "Friday",
+  "FRM": "Form",
+  "FRMG": "Forming",
+  "FRMN": "Formation",
+  "frng": "firing",
+  "FROPA": "Frontal Passage",
+  "FROSFC": "Frontal Surface",
+  "FRQ": "Frequent",
+  "FRST": "Frost",
+  "FRWF": "Forecast Wind Factor",
+  "FRZ": "Freeze",
+  "FRZG": "Freezing",
+  "FRZLVL": "Freezing Level",
+  "FRZN": "Frozen",
+  "FSS": "Flight Service Station",
+  "FT": "Feet",
+  "FT (alt)": "Terminal Forecast",
+  "FTHR": "Further",
+  "FTIT": "Fan Turbine Inlet Temperature",
+  "ftr": "fighter",
+  "FTS": "Flexible Track System",
+  "FU": "Smoke",
+  "FULYR": "Smoke Layer Aloft",
+  "FUOCTY": "Smoke Over City",
+  "FVRBL": "Favorable",
+  "FWC": "Fleet Weather Central",
+  "FWD": "Forward",
+  "FYI": "For Your Information",
+  "FZ": "Freezing",
+  "FZDZ": "Freezing Drizzle (Metar)",
+  "FZFG": "Freezing Fog (Metar)",
+  "FZRA": "Freezing Rain",
+  "FZRANO": "Freezing Rain Sensor Not Operating",
+  "G": "Gust",
+  "G/S": "Ground Speed",
+  "GA": "Georgia or Glide Angle",
+  "gal": "gallon",
+  "GAT": "General Air Traffic (Europe-Asia)",
+  "GC": "Ground Control",
+  "GCA": "Ground Control Approach",
+  "GCO": "Ground Communication Outlet",
+  "GEN": "General",
+  "GENLY": "Generally",
+  "GEO": "Geographic",
+  "GEOREF": "Geographical Reference",
+  "GF": "Ground Fog",
+  "GICG": "Glaze Icing",
+  "gldr": "glider",
+  "GLFALSK": "Gulf of Alaska",
+  "GLFALSKID": "Gulf Of Alaska",
+  "GLFCAL": "Gulf of California",
+  "GLFMEX": "Gulf of Mexico",
+  "GLFSTLAWR": "Gulf of St. Lawrence",
+  "GLONASS": "Global Orbiting Navigation Satellite System",
+  "GMT": "Greenwich Mean Time",
+  "GND": "Ground",
+  "GNDFG": "Ground Fog",
+  "GNSS": "Global Navigation Satellite System",
+  "govt": "government",
+  "GP": "Glide Path or Group",
+  "GPI": "Ground Point of Intercept",
+  "GPS": "Global Positioning System",
+  "GR": "Hail (>5mm)",
+  "GRAD": "Gradient",
+  "GRBNKS": "Grand Banks",
+  "grd": "guard",
+  "GRDL": "Gradual",
+  "GRDLY": "Gradually",
+  "GRT": "Great",
+  "GRTLKS": "Great Lakes",
+  "GRTLY": "Greatly",
+  "GRTR": "Greater",
+  "GRTST": "Greatest",
+  "GRVD": "Grooved surface for improved traction and water drainage",
+  "GRVL": "Gravel",
+  "GS": "Small Hail / Snow Pellets (<5mm) or glide slope",
+  "GSTS": "Gusts",
+  "GSTY": "Gusty",
+  "GV": "Ground Visibility",
+  "GWT": "gross weight",
+  "H": "Enroute High Altitude Chart (followed by identification) or Hour",
+  "H+": "Hours or hours plus...minutes past the hour",
+  "H24": "continuous operation",
+  "Ha": "Field Elevation",
+  "HAA": "Height Above Airport/Aerodrome",
+  "HAL": "Height Above Landing Area",
+  "HAR": "Height Above Runway",
+  "HAS": "Height Above Site",
+  "HAT": "Height Above Touchdown",
+  "HAZ": "Hazard",
+  "HC": "Critical Height",
+  "HCVIS": "High Clouds Visible",
+  "HDFRZ": "Hard Freeze",
+  "hdg": "heading",
+  "HDSVLY": "Hudson Valley",
+  "HDTA": "High Density Traffic Airport/Aerodrome",
+  "HDWND": "Head Wind",
+  "HEL": "Helicopter",
+  "HELI": "Heliport",
+  "HF": "High Frequency (3000 to 30,000 KHz)",
+  "hgr": "hangar",
+  "HGT": "Height",
+  "HI": "High",
+  "HIALS": "High Intensity Approach Light System",
+  "HIEAT": "Highest Temperature Equaled For All Time",
+  "HIEFM": "Highest Temperature Equaled For The Month",
+  "HIER": "Higher",
+  "HIESE": "Highest Temperature Equaled So Early",
+  "HIESL": "Highest Temperature Equaled So Late",
+  "HIFOR": "High-Level Forecast",
+  "HIRL": "High Intensity Runway Lights",
+  "HITMP": "Highest Temperature",
+  "HIWAS": "Hazardous Inflight Weather Advisory Service",
+  "HIXAT": "Highest Temperature Exceeded For All Time",
+  "HIXFM": "Highest Temperature Exceeded For The Month",
+  "HIXSE": "Highest Temperature Exceeded So Early",
+  "HIXSL": "Highest Temperature Exceeded So Late",
+  "HJ": "Sunrise To Sunset",
+  "HLDG": "Holding",
+  "HLF": "Half",
+  "HLSTO": "Hailstones",
+  "HLTP": "Hilltop",
+  "HLYR": "Haze Layer Aloft",
+  "HN": "Sunset To Sunrise",
+  "HND": "Hundred",
+  "HO": "Service available to meet operational requirements",
+  "hol": "holiday",
+  "HOLF": "Helicopter Outlying Field",
+  "hosp": "hospital",
+  "Hp": "Station Elevation",
+  "hPa": "Hectopascal",
+  "HQ": "Headquarters",
+  "HR": "Hour",
+  "HRS": "Hours",
+  "HRZN": "Horizon",
+  "HS": "Service available during hours of scheduled operations",
+  "hsg": "housing",
+  "HSI": "Horizontal Situation Indicator",
+  "HST": "High Speed Taxiway Turn Off",
+  "HTG": "Heating",
+  "HUD": "Head-Up Display",
+  "HURCN": "Hurricane",
+  "HUREP": "Hurricane Report",
+  "HV": "Have",
+  "HVY": "Heavy",
+  "HVYR": "Heavier",
+  "HVYST": "Heaviest",
+  "HW": "Heavy Weight",
+  "HWVR": "However",
+  "HWY": "Highway",
+  "HX": "station having no specific working hours",
+  "HZ": "Haze or Hertz (cycles per second)",
+  "I": "Island",
+  "I/V": "Instrument/visual Controlled Airspace",
+  "IA": "Iowa",
+  "IAF": "Initial Approach Fix",
+  "IAP": "Instrument Approach Procedure",
+  "IAS": "Indicated Airspeed",
+  "IAW": "in accordance with",
+  "IBN": "Identification Beacon",
+  "IC": "Ice or Ice Crystals, In-Cloud Lightning",
+  "ICAO": "International Civil Aviation Organization",
+  "ICG": "Icing",
+  "ICGIC": "Icing in Clouds",
+  "ICGICIP": "Icing In Clouds And Precipitation",
+  "ICGIP": "Icing in Precipitation",
+  "ID": "Idaho",
+  "ident": "identification",
+  "IF": "Intermediate Fix",
+  "IFF": "Identification, Friend or Foe",
+  "IFR": "Instrument Flight Rules",
+  "IFR-S": "FLIP IFR Supplement",
+  "IGS": "Instrument Guidance System",
+  "IL": "Illinois",
+  "ILS": "Instrument Landing System",
+  "IM": "Inner Marker",
+  "IMC": "Instrument Meteorological Conditions",
+  "IMDT": "Immediate",
+  "IMDTLY": "Immediately",
+  "IMG": "Immigration",
+  "immed": "immediate",
+  "IMPL": "Impulse",
+  "IMPLS": "Impulses",
+  "IMPT": "Important",
+  "IMTA": "Intensive Military Training Area",
+  "IN": "Inches",
+  "inbd": "inbound",
+  "Inc": "Incorporated",
+  "INCL": "Include",
+  "INCLD": "Included",
+  "INCLG": "Including",
+  "INCLS": "Includes",
+  "INCR": "Increase",
+  "INCRD": "Increased",
+  "INCRG": "Increasing",
+  "INCRGLY": "Increasingly",
+  "INCRS": "Increases",
+  "INDC": "Indicate",
+  "INDCD": "Indicated",
+  "INDCG": "Indicating",
+  "INDCS": "Indicates",
+  "INDEF": "Indefinite",
+  "INDEFLY": "Indefinitely",
+  "INFO": "Information",
+  "INLD": "Inland",
+  "inop": "inoperative",
+  "INS": "Inertial Navigation System",
+  "inst": "instrument",
+  "INSTBY": "Instability",
+  "instl": "install",
+  "instr": "instruction",
+  "INSTS": "Intensity",
+  "int": "intersection",
+  "INTCNTL": "Intercontinental",
+  "intcp": "intercept",
+  "INTL": "International",
+  "INTMD": "Intermediate",
+  "INTMT": "Intermittent",
+  "INTMTLY": "Intermittently",
+  "INTR": "Interior",
+  "INTRMTRGN": "Intermountain Region",
+  "INTS": "intense, intensity",
+  "INTSFCN": "Intensification",
+  "INTSFY": "Intensify",
+  "INTSFYD": "Intensified",
+  "INTSFYG": "Intensifying",
+  "INTSFYS": "Intensifies",
+  "INTSTY": "Intensity",
+  "INTVL": "Interval",
+  "INVOF": "In Vicinity Of",
+  "INVRN": "Inversion",
+  "IORRA": "Indian Ocean Random Rnav Area",
+  "IOVC": "In Overcast",
+  "IP": "Ice Pellets",
+  "IPV": "Improve",
+  "IPVG": "Improving",
+  "IR": "Infrared",
+  "irreg": "Irregularly",
+  "IRS": "Inertial Reference System",
+  "IS": "Islands",
+  "ISOL": "Isolate",
+  "ISOLD": "Isolated",
+  "ITWS": "Integrated Terminal Weather System",
+  "J": "Jet Route",
+  "JAA": "Joint Aviation Authorities",
+  "Jan": "January",
+  "JASU": "Jet Aircraft Starting Unit",
+  "JATO": "Jet Assisted Take-Off",
+  "JCTN": "Junction",
+  "JOAP": "Joint Oil Analysis Program",
+  "JOSAC": "Joint Operational Support Airlift Center",
+  "JRB": "Joint Reserve Base",
+  "JTSTR": "Jet Stream",
+  "Jul": "July",
+  "Jun": "June",
+  "K": "Cold (Air Mass)",
+  "K or Kt": "Knots",
+  "KFRST": "Killing Frost",
+  "KGS": "Kilograms",
+  "kHz": "kilohertz",
+  "KIAS": "Knots Indicated Airspeed",
+  "KLIZ": "Korea Limited Identification Zone",
+  "KLYR": "Smoke Layer Aloft",
+  "km": "Kilometer",
+  "KMH": "Kilometers Per Hour",
+  "KOCTY": "Smoke Over City",
+  "KS": "Kansas",
+  "KT": "Knots",
+  "KTAS": "Knots True Airspeed",
+  "KTS": "Knots (Pirep)",
+  "kw": "kilowatt",
+  "KY": "Kentucky",
+  "L": "Local Time or Left (With Reference to Runway Designation)",
+  "L-AOE": "Limited Airport of Entry",
+  "LA": "Louisiana",
+  "LAA": "Local Airport Advisory",
+  "LABRDR": "Labrador",
+  "LACFT": "Large Aircraft",
+  "LAHSO": "Land and Hold-Short Operations",
+  "LANDING WEIGHT": "The actual aircraft weight upon landing, equal to takeoff weight minus fuel burned in flight",
+  "LAST": "Last Observation Before a Break in Coverage at a Manual Station",
+  "LAT": "Latitude",
+  "LAWRS": "Limited Aviation Weather Reporting Station",
+  "lb": "pound (weight)",
+  "LBCM": "Locator Back Course Marker",
+  "LBM": "Locator Back Marker",
+  "lbs": "pounds (weight)",
+  "LC": "local call",
+  "LCG": "Load Classification Group",
+  "LCL": "Local",
+  "LCLY": "Locally",
+  "LCN": "Load Classification Number",
+  "LCP": "French Peripheral Classification Line",
+  "LCTD": "Located",
+  "LCTMP": "Little Change in Temperature",
+  "LCTN": "Location",
+  "lctr": "locator",
+  "LCVASI": "Low Cost Visual Approach Slope Indicator",
+  "lczr": "localizer",
+  "LD": "long distance",
+  "LDA": "Landing Distance Available",
+  "LDG": "Landing",
+  "LDI": "Landing Direction Indicator",
+  "LDIN": "Lead-in Lights",
+  "LDOCF": "Long Distance Operations Control Facility",
+  "LED": "Light Emitting Diode",
+  "len": "length",
+  "LEVEL": "Level",
+  "LEW": "Licensed Empty Weight — same as MEW, typically recorded on the aircraft’s type certificate",
+  "LFM": "Limited Fine Mesh Model",
+  "LFT": "Lift",
+  "LFTG": "Lifting",
+  "LGRNG": "Long Range",
+  "LGT": "Light",
+  "lgtd": "lighted",
+  "LGTH": "Length",
+  "LGTR": "Lighter",
+  "lgts": "lights",
+  "LGWV": "Long Wave",
+  "LI": "Lifted Index",
+  "LIFR": "Low Ifr (Weather Reports Only)",
+  "LIM": "Locator Inner Marker",
+  "LIMC": "Low Instrument Meteorological Conditions",
+  "LIRL": "Low Intensity Runway Lights",
+  "LIS": "Lifted Indices",
+  "LK": "Lake",
+  "LKLY": "Likely",
+  "LKS": "Lakes",
+  "LLJ": "Low Level Jet",
+  "LLWAS": "Low-Level Wind Shear Alert System",
+  "LLWS": "Low Level Wind Shear",
+  "LLZ": "Localizer (Instrument Approach Procedures Identification only)",
+  "LM": "Compass Locator At Ils Outer Marker",
+  "LMM": "Compass locator at Middle Marker ILS",
+  "LMTD": "Limited",
+  "LMTG": "Limiting",
+  "LMTS": "Limits",
+  "LN": "Line",
+  "LNAV": "Lateral Navigation",
+  "LNDG": "Landing",
+  "LO": "Low",
+  "LOA": "Letter of Agreement",
+  "LoALT or LA": "Low Altitude",
+  "LOC": "Localizer or Location",
+  "LOEAT": "Lowest Temperature Equaled For All Time",
+  "LOEFM": "Lowest Temperature Equaled For The Month",
+  "LOESE": "Lowest Temperature Equaled So Early",
+  "LOESL": "Lowest Temperature Equaled So Late",
+  "LOM": "Compass locator at Outer Marker ILS",
+  "LONG": "Longitude",
+  "LONGL": "Longitudinal",
+  "LORAN": "Long-Range Navigation",
+  "LOTMP": "Lowest Temperature",
+  "LOXAT": "Lowest Temperature Exceeded For All Time",
+  "LOXFM": "Lowest Temperature Exceeded For The Month",
+  "LOXSE": "Lowest Temperature Exceeded So Early",
+  "LOXSL": "Lowest Temperature Exceeded So Late",
+  "LR": "Long Range, Lead Radial",
+  "LRA": "Landing Rights Airport",
+  "LRG": "Large",
+  "LRGLY": "Largely",
+  "LRGR": "Larger",
+  "LRGST": "Largest",
+  "LRN": "Loran",
+  "LRRS": "Long Range RADAR Station",
+  "LSALT": "Lowest Safe Altitude",
+  "LSB": "lower side band",
+  "LSR": "Loose Snow On Runway/s",
+  "LST": "Local Standard Time",
+  "LT": "Local Time",
+  "LTD": "Limited",
+  "LTG": "Lightning",
+  "LTGCA": "Lightning Cloud-to-air",
+  "LTGCC": "Lightning Cloud-to-Cloud",
+  "LTGCCCG": "Lightning Cloud-to-Cloud Cloud-to-Ground",
+  "LTGCG": "Lightning Cloud-to-Ground",
+  "LTGCW": "Lightning Cloud-to-Water",
+  "LTGIC": "Lightning in Cloud",
+  "LTL": "Little",
+  "LTLCG": "Little Change",
+  "LTNG": "Lightning",
+  "LTR": "Later",
+  "LTS": "Lights",
+  "LTST": "Latest",
+  "LV": "Leaving",
+  "LVL": "Level",
+  "LVLS": "Levels",
+  "LWR": "Lower",
+  "LWRD": "Lowered",
+  "LWRG": "Lowering",
+  "LX": "Low Index",
+  "LYR": "Layer",
+  "LYRD": "Layered",
+  "LYRS": "Layers",
+  "M": "meters, magnetic (after a bearing), Military Circuit (Telephone)",
+  "MA": "Massachusetts",
+  "MAA": "Maximum Authorized Altitude",
+  "MACC": "Military Area Control Center",
+  "MACH": "Machmeter",
+  "mag": "magnetic",
+  "maint": "maintain, maintenance",
+  "maj": "major",
+  "MALS": "Medium Intensity Approach Lighting System",
+  "MALSF": "MALS with Sequenced Flashers",
+  "MALSR": "Medium-intensity Approach Lighting System with Runway Alignment Indicator Lights",
+  "MAN": "Manitoba",
+  "MAP": "Missed Approach Point",
+  "MAPT": "Missed Approach Point",
+  "Mar": "March",
+  "MARA": "Military Activity Restricted Area",
+  "MATO": "Military Air Traffic Operations",
+  "MATZ": "Military Aerodrome Traffic Zone",
+  "MAX": "Maximum",
+  "MB": "Millibars",
+  "MBZ": "Mandatory Broadcast Zone",
+  "MCA": "Minimum Crossing Altitude",
+  "MCAC": "Military Common Area Control",
+  "MCAF": "Marine Corps Air Facility",
+  "MCALF": "Marine Corps Auxiliary Landing Field",
+  "MCAS": "Marine Corps Air Station",
+  "MCB": "Marine Corps Base",
+  "MCC": "Military Climb Corridor",
+  "MCD": "Mesoscale Discussion",
+  "MCOLF": "Marine Corps Outlying Field",
+  "MCTA": "Military Controlled Airpsace",
+  "MD": "Maryland",
+  "MDA": "Minimum Descent Altitude",
+  "MDFY": "Modify",
+  "MDFYD": "Modified",
+  "MDFYG": "Modifying",
+  "MDL": "Model",
+  "MDLS": "Models",
+  "MDT": "Moderate",
+  "MDTLY": "Moderately",
+  "ME": "Maine",
+  "MEA": "Minimum Enroute Altitude",
+  "MED": "Medium",
+  "MEGG": "Merging",
+  "MEHT": "Minimum Eye Height over Threshold",
+  "mem": "memorial",
+  "MEML": "Memorial",
+  "MESO": "Mesoscale",
+  "MET": "Meteorological, Meteorology",
+  "METAR": "Meteorological Aerodrome Report or Aviation Routine Weather Report",
+  "METRO": "Metropolitan or Pilot-to-Metro voice cell",
+  "MEW": "Manufacturer’s Empty Weight — weight of the aircraft as built, including airframe, engines, fixed equipment, and unusable fuel, but excluding usable fuel and payload",
+  "MEX": "Mexico",
+  "MF": "Medium Frequency (300 to 3000 KHz), Mandatory Frequency (Canada)",
+  "MF1M-10C": "Meteorological Form 1M-10C",
+  "MFA": "Minimum Flight Altitude",
+  "MFD": "Multi-Function Display",
+  "mgmt": "Management",
+  "mgr": "manager",
+  "MHA": "Minimum Holding Altitude",
+  "MHKVLY": "Mohawk Valley",
+  "MHz": "Megahertz",
+  "MI": "Shallow or mile",
+  "MIALS": "Medium Intensity Approach Light System",
+  "MID": "Middle or Midnight",
+  "MID/ASIA": "Middle East/Asia (ICAO Region)",
+  "MIDN": "Midnight",
+  "MIFG": "Patches Of Shallow Fog Not Deeper Than Two Meters (Metar)",
+  "MIJI": "Meaconing, Intrusion, Jamming, and Interference",
+  "MIL": "Military",
+  "MIM": "Minimum",
+  "MIN": "minimum, minute",
+  "MIRL": "Medium Intensity Runway Lights",
+  "MISG": "Missing",
+  "misl": "missile",
+  "MISO": "Missing Soil (temperature) Observation",
+  "MKR": "Marker Beacon",
+  "MLS": "Microwave Landing System",
+  "MLTLVL": "Melting Level",
+  "MLW": "Maximum Landing Weight — the maximum certificated weight at which the aircraft is approved for landing",
+  "MM": "Middle Marker of ILS",
+  "MMO": "Main Meteorological Office",
+  "MN": "Minnesota",
+  "MNLD": "Mainland",
+  "MNLND": "Mainland",
+  "MNLY": "Mainly",
+  "MNM": "Minimum",
+  "MNPS": "Minimum Navigation Performance Specifications",
+  "mnt": "monitor",
+  "MO": "Missouri",
+  "MOA": "Military Operations Area",
+  "MOC": "Minimum Obstruction Clearance",
+  "MOCA": "Minimum Obstruction Clearance Altitude",
+  "MOD": "Moderate or modify",
+  "MOG": "Maximum (aircraft) on the Ground",
+  "MOGR": "Moderate or Greater",
+  "MON": "Minimum Operational Network airport. Has at least one VOR or ILS approach that can be flown without GPS, WAAS, DME, NDB, or RADAR. Designed for recovery in case of GPS outage.",
+  "MONTR": "Monitor",
+  "MORA": "Minimum Off Route Altitude",
+  "MOV": "Moved/Moving/Movement",
+  "MOVD": "Moved",
+  "MOVG": "Moving",
+  "MOVMT": "Movement",
+  "MOVS": "Moves",
+  "MP": "Maintenance Period",
+  "MPH": "Miles per Hour",
+  "MPS": "Meters Per Second (1 Mps = 1.944 Kts)",
+  "MR": "Medium Range",
+  "MRA": "Minimum Reception Altitude",
+  "MRGL": "Marginal",
+  "MRGLLY": "Marginally",
+  "mrk": "mark, marker",
+  "MRNG": "Morning",
+  "MRTM": "Maritime",
+  "MRW": "Maximum Ramp Weight — the heaviest weight allowed while on the ground, including taxi fuel",
+  "MS": "Mississippi",
+  "MSA": "Minimum Safe Altitude",
+  "MSAW": "minimum safe altitude warning",
+  "MSG": "Message",
+  "MSL": "Mean Sea Level",
+  "msn": "Mission",
+  "MST": "Most",
+  "MSTLY": "Mostly",
+  "MSTR": "Moisture",
+  "MT": "Montana or mount, mountain",
+  "MTA": "Military Training Area",
+  "MTAF": "Mandatory Traffic Advisory Frequency",
+  "MTCA": "Military Terminal Control Area",
+  "mthly": "monthly",
+  "MTMA": "Military Terminal Control Area",
+  "MTN": "Mountain",
+  "MTNS": "Mountains",
+  "MTOW": "Maximum Takeoff Weight — the maximum certificated weight at which an aircraft is allowed to start takeoff",
+  "MTR": "Military Training Route",
+  "MU": "Mu Meters",
+  "MUAC": "Military Upper Area Control",
+  "MUD": "Mud",
+  "MULT": "Multiple",
+  "MULTILVL": "Multi-Level",
+  "MUN": "Municipal",
+  "muni": "municipal",
+  "MVA": "Minimum Vectoring Altitude",
+  "MVFR": "Marginal Visual Flight Rules",
+  "MWARA": "Major World Air Route Area",
+  "MX": "Mixed, Icing Type (Pirep)",
+  "MXD": "Mixed",
+  "MZFW": "Maximum Zero Fuel Weight — the maximum allowable zero fuel weight to prevent excessive wing bending loads",
+  "N": "North",
+  "N/A": "not applicable",
+  "NA": "not authorized (For Instrument Approach Procedure take-off and alternate MINIMA only) or Not Applicable",
+  "NAAS": "Naval Auxiliary Air Station",
+  "NAB": "Not Above",
+  "NADC": "Naval Air Development Center",
+  "NADEP": "Naval Air Depot",
+  "NAEC": "Naval Air Engineering Center",
+  "NAES": "Naval Air Engineering Station",
+  "NAF": "Naval Air Facility",
+  "NALCO": "Naval Air Logistics Control Office",
+  "NALF": "Naval Auxiliary Landing Field",
+  "NALO": "Navy Air Logistics Office",
+  "NAR": "North American Routes",
+  "NAS": "Naval Air Station",
+  "NAT": "North Atlantic (ICAO Region)",
+  "NAT/OTS": "North Atlantic Traffic/organized Track System",
+  "NATL": "National",
+  "NAV": "Navigation",
+  "navaid": "navigation aid",
+  "NAVMTO": "Navy Material Transportation Office",
+  "NAWC": "Naval Air Warfare Center",
+  "NAWS": "Naval Air Weapons Station",
+  "NB": "New Brunswick",
+  "NBND": "Northbound",
+  "NBRHD": "Neighborhood",
+  "NC": "North Carolina",
+  "NCA": "Northern Control Area",
+  "NCEI": "National Center for Environmental Information",
+  "NCRP": "Non-Compulsory Reporting Point",
+  "NCWX": "No Change in Weather",
+  "ND": "North Dakota",
+  "NDB": "Non-Directional Radio Beacon",
+  "NE": "Northeast",
+  "NEB": "Nebraska",
+  "NEC": "Necessary",
+  "NEG": "Negative",
+  "NEGLY": "Negatively",
+  "NELY": "Northeasterly",
+  "NERN": "Northeastern",
+  "NEW": "Net Explosives Weight",
+  "NEW ENG": "New England",
+  "NEWD": "Northeastward",
+  "NF-OBS": "Non-Federal Weather Observation",
+  "NFCT": "Non-Federal Control Tower",
+  "NFLD": "Newfoundland",
+  "NGM": "Nested Grid Model",
+  "NGRVR": "New Generation Runway Visual Range",
+  "NGT": "Night",
+  "NH": "New Hampshire",
+  "NIL": "None",
+  "NJ": "New Jersey",
+  "NL": "No Layers",
+  "NLT": "Not Later Than",
+  "NLY": "Northerly",
+  "NM": "New Mexico or nautical miles",
+  "NMBR": "Number",
+  "NMBRS": "Numbers",
+  "NMC": "National Meteorological Center",
+  "NML": "Normal",
+  "NMR": "nautical mile radius",
+  "NMRS": "Numerous",
+  "NNE": "North-Northeast",
+  "NNELY": "North-Northeasterly",
+  "NNERN": "North-Northeastern",
+  "NNEWD": "North-Northeastward",
+  "NNNN": "End of Message",
+  "NNW": "North-Northwest",
+  "NNWLY": "North-Northwesterly",
+  "NNWRN": "North-Northwestern",
+  "NNWWD": "North-Northwestward",
+  "NO": "Not Available",
+  "No or Nr": "number",
+  "NOAA": "National Oceanic and Atmospheric Administration",
+  "NOLF": "Naval Outlying Field",
+  "NONSTD": "Non-standard",
+  "NOPAC": "Northern Pacific",
+  "NOPT": "No Procedure Turn",
+  "NORDO": "Lost communications or no radio installed/available in aircraft",
+  "NORPI": "No Pilot Balloon Observation Will Be Filed. Next Collection Unless Weather Changes Significantly",
+  "NOSPECI": "No SPECI Reports Are Taken at the Station",
+  "NOSPL": "No Special Observations Taken (Weather Reports Only)",
+  "NOTAM": "Notice to Airmen",
+  "NOTROD": "No Observation Taken, Rattlesnake On Doorstep",
+  "Nov": "November",
+  "npi": "non precision instrument",
+  "NPRS": "Nonpersistent",
+  "NR": "Near",
+  "Nr or No": "number",
+  "NRLY": "Nearly",
+  "NRN": "Northern",
+  "NRW": "Narrow",
+  "NS": "Nova Scotia or Naval Station",
+  "NS ABTMT": "Noise Abatement",
+  "NSA": "Naval Support Activity",
+  "NSCSWD": "No Small Craft Or Storm Warning Are Being Displayed",
+  "NSF": "Naval Support Facility",
+  "NSTD": "nonstandard",
+  "NSW": "No Significant Weather",
+  "NTAP": "Notice To Airmen Publication",
+  "ntc": "notice",
+  "NTFY": "Notify",
+  "NTFYD": "Notified",
+  "NV": "Nevada",
+  "NVA": "Negative Vorticity Advection",
+  "NVD": "Night Vision Devices",
+  "NVG": "Night Vision Goggles",
+  "NW": "Northwest",
+  "NWC": "Naval Weapons Center",
+  "NWD": "Northward",
+  "NWLY": "Northwesterly",
+  "NWRN": "Northwestern",
+  "NWS": "National Weather Service",
+  "NXT": "Next",
+  "NY": "New York",
+  "O/A": "On or about",
+  "O/R": "On Request",
+  "O/S": "out of service",
+  "O/T": "Other Times",
+  "OAC": "Oceanic Area Control",
+  "OAT": "Outside Air Temperature or Operational Air Traffic",
+  "OBND": "Outbound",
+  "OBS": "Observation or Omni-Bearing Selector",
+  "OBSC": "Obscure",
+  "OBSCD": "Obscured",
+  "OBSCG": "Obscuring",
+  "obsn": "observation",
+  "obst": "obstruction",
+  "OCA": "Oceanic Control Area",
+  "OCC": "Occasional (Pirep)",
+  "OCFNT": "Occluded Front",
+  "OCL": "Obstruction Clearance Limit",
+  "OCLD": "Occlude",
+  "OCLDD": "Occluded",
+  "OCLDG": "Occluding",
+  "OCLDS": "Occludes",
+  "OCLN": "Occlusion",
+  "OCNL": "Occasional",
+  "OCNLY": "Occasionally",
+  "OCR": "Occur",
+  "OCRD": "Occurred",
+  "OCRG": "Occurring",
+  "OCRS": "Occurs",
+  "Oct": "October",
+  "OCTA": "Oceanic Control Area",
+  "ODALS": "Omnidirectional Approach Lighting System",
+  "ODO": "Operations Duty Officer",
+  "OEW": "Operating Empty Weight — basic empty weight plus crew, crew baggage, catering, and other standard operational items, excluding usable fuel and payload",
+  "OFC": "Office",
+  "OFCM": "Office of the Federal Coordinator for Meteorology",
+  "offl": "official",
+  "OFP": "Occluded Frontal Passage",
+  "OFSHR": "Offshore",
+  "OH": "Ohio",
+  "OHD": "Overhead",
+  "OIC": "Officer In Charge",
+  "OID": "Operator Interface Device",
+  "OK": "Oklahoma",
+  "OLF": "Outlying Field",
+  "OLS": "Optical Landing System",
+  "OM": "Outer Marker, ILS",
+  "OMTNS": "Over Mountains",
+  "ONSHR": "On Shore",
+  "ONT": "Ontario",
+  "opr": "operate, operator, operational",
+  "OPS": "operations",
+  "OR": "Oregon",
+  "ORGPHC": "Orographic",
+  "ORIG": "Original",
+  "OROCA": "Off Route Obstruction Clearance Altitude",
+  "ORTCA": "Off Route Terrain Clearance Altitude",
+  "OSV": "Ocean Station Vessel",
+  "OT": "other times or Operator Terminal",
+  "OTAS": "On Top And Smooth",
+  "OTLK": "Outlook",
+  "OTP": "On Top",
+  "OTR": "Other",
+  "OTRW": "Otherwise",
+  "OTS": "out of service",
+  "outbd": "outbound",
+  "OUTFLO": "Outflow",
+  "OV": "Over (Location Of Pirep)",
+  "OVC": "Overcast Cloud Layer (8/8ths coverage)",
+  "ovft": "overflight",
+  "OVNGT": "Overnight",
+  "OVR": "Over",
+  "OVRN": "Overrun",
+  "OVRNG": "Overrunning",
+  "OVTK": "Overtake",
+  "OVTKG": "Overtaking",
+  "OVTKS": "Overtakes",
+  "OX": "oxygen",
+  "P": "More than or Greater Than",
+  "p-line": "power line",
+  "P/L": "plain language",
+  "P6SM": "Plus 6 Statute Miles, Greater than 'More than'",
+  "PA": "Pennsylvania",
+  "PAC": "Pacific (ICAO Region)",
+  "PAEW": "personnel and equipment working",
+  "PALS": "Precision Approach and Landing System (NAVY)",
+  "PAPI": "Precision Approach Path Indicator",
+  "PAR": "Precision Approach Radar",
+  "para": "paragraph",
+  "parl": "parallel",
+  "PAT": "pattern or Traffic Pattern Altitude (feet MSL)",
+  "PAX": "Passenger",
+  "PAYLOAD": "Weight of passengers, baggage, and cargo only, excluding usable fuel",
+  "PBL": "Planetary Boundary Layer",
+  "PCL": "pilot controlled lighting",
+  "PCN": "Pavement Classification Number",
+  "PCPN": "Precipitation",
+  "PCR": "Pavement Classification Rating",
+  "PCZ": "Positive Control Zone",
+  "PD": "Period",
+  "PDC": "Pre-Departure Clearance",
+  "PDMT": "Predominant",
+  "PDS": "Periods",
+  "PDT": "Pacific Daylight Time",
+  "PDW": "Priority Delayed Weather",
+  "PE": "Ice Pellets",
+  "PEN": "Peninsula",
+  "pent": "penetrate",
+  "PERM": "Permanent",
+  "perms": "permission",
+  "pers": "personnel",
+  "PFC": "Porous Friction Courses",
+  "PFD": "Primary Flight Display",
+  "PGTSND": "Puget Sound",
+  "PHYS": "Physical",
+  "PIBAL": "Pilot Balloon Observation",
+  "PIBALS": "Pilot Balloon Reports",
+  "PIREP": "Pilot Weather Report",
+  "PIREPS": "Pilot Reports",
+  "PISE": "No Pilot Balloon Observation Due To Unfavorable Sea Conditions",
+  "PISO": "No Pilot Balloon Observation Due To Snow",
+  "PISTON": "Piston Aircraft",
+  "PIWI": "No Pilot Balloon Observation Due To High, Or Gusty, Surface Wind",
+  "PJE": "Parachuting Activities/Exercises",
+  "PK": "Peak",
+  "PK WND": "Peak Winds",
+  "PL": "Ice Pellets",
+  "PLA": "Practice Low Approach",
+  "PLASI": "Pulsating Visual Approach Slope Indicator",
+  "PLNS": "Plains",
+  "PLS": "Please",
+  "PLTO": "Plateau",
+  "PLW": "Plow/plowed",
+  "PM": "Post meridian, noon til midnight",
+  "PMRF": "Pacific Missile Range Facility",
+  "PMSV": "Pilot-to-Metro Service",
+  "PN": "prior notice",
+  "PNHDL": "Panhandle",
+  "PNO": "Precipitation Amount Not Available",
+  "PO": "Dust/Sand Whirls (Dust Devils)",
+  "POB": "persons on board",
+  "POH": "Pilot Operating Handbook",
+  "POL": "Petrol, Oils and Lubricants",
+  "POS": "Positive",
+  "POSLY": "Positively",
+  "posn": "position",
+  "PPINA": "Radar Weather Reports Not Available",
+  "PPINE": "PPI No Echoes",
+  "PPINO": "Radar Weather Report Equipment Inopeerative Due To Breaksown",
+  "PPIOK": "Radar Weather Report Equipment Operation Resumed",
+  "PPIOM": "Radar Weather Report Equipment Inoperative Due To Maintenance",
+  "PPO": "Prior Permission Only",
+  "PPR": "prior permission required",
+  "PPSN": "Present Position",
+  "PR": "Partial",
+  "PRA": "Precision Radar Approach",
+  "PRBL": "Probable",
+  "PRBLTY": "Probability",
+  "PRBLY": "Probably",
+  "prcht": "parachute",
+  "PRECD": "Precede",
+  "PRECDD": "Preceded",
+  "PRECDG": "Preceding",
+  "PRECDS": "Precedes",
+  "pref": "prefer",
+  "PRES": "Pressure",
+  "PRESFR": "Pressure Falling Rapidly",
+  "PRESRR": "Pressure Rising Rapidly",
+  "prev": "previous",
+  "PREWX": "Present Weather",
+  "PRFG": "Fog Partial (Metar)",
+  "PRIM": "Primary",
+  "PRIN": "Principal",
+  "PRIND": "Present Indications Are",
+  "PRJMP": "Pressure Jump",
+  "prk": "park",
+  "PRM": "Precision Runway Monitor",
+  "PRN": "Psuedo Random Noise",
+  "pro": "procedure",
+  "PROB30": "Slight Chance, Probablility 30 Percent (Taf)",
+  "PROB40": "Probability of 40%",
+  "PROC": "Procedure",
+  "PROD": "Produce",
+  "PRODG": "Producing",
+  "PROG": "Forecast",
+  "PROGD": "Forecasted",
+  "PROGS": "Forecasts",
+  "proh": "prohibited",
+  "PROP": "Propeller Aircraft",
+  "PRSNT": "Present",
+  "PRSNTLY": "Presently",
+  "PRST": "Persist",
+  "PRSTNC": "Persistence",
+  "PRSTNT": "Persistent",
+  "PRSTS": "Persists",
+  "PRVD": "Provide",
+  "PRVDD": "Provided",
+  "PRVDG": "Providing",
+  "PRVDS": "Provides",
+  "PS": "Plus",
+  "PSBL": "Possible",
+  "PSBLTY": "Possibility",
+  "PSBLY": "Possibly",
+  "PSG": "Passage",
+  "PSI": "Maximum allowable tire pressure (pounds per square inch)",
+  "PSN": "Position",
+  "PSND": "Positioned",
+  "PSP": "Pacific Standard Time",
+  "PSR": "Packed Snow On Runway(s)",
+  "pt": "point",
+  "PTCHY": "Patchy",
+  "PTD": "Pilot to Dispatcher",
+  "PTLY": "Partly",
+  "PTN": "Procedure Turn",
+  "PTNL": "Potential",
+  "PTNLY": "Potentially",
+  "PTNS": "Portions",
+  "pub": "publication",
+  "publ": "publish",
+  "PUGET": "Puget Sound",
+  "PVA": "Positive Vorticity Advection",
+  "PVASI": "Pulsating Visual Approach Slope Indicator",
+  "PVL": "Prevail",
+  "PVLD": "Prevailed",
+  "PVLG": "Prevailing",
+  "PVLS": "Prevails",
+  "PVLT": "Prevalent",
+  "pvt": "private",
+  "PWINO": "Present Weather Information Not Available (Automated System)",
+  "PWR": "Power",
+  "PY": "Spray",
+  "QDM": "Magnetic Bearing To Facility",
+  "QDR": "Height Above Airport Elevation",
+  "QFE": "Altimeter Setting above station",
+  "QN": "Question",
+  "QNE": "Altimeter Setting of 29.92 inches which provides height above standard datum plane",
+  "QNH": "Altimeter Setting which provides height above mean sea level",
+  "QPFERD": "NMC Excessive Rainfall Discussion",
+  "QPFHSD": "NMC Heavy Snow Discussion",
+  "QPFSPD": "NMC Special Precipitation Discussion",
+  "QSTNRY": "Quasistationary",
+  "qtrs": "quarters",
+  "QUAD": "Quadrant",
+  "QUE": "Quebec",
+  "R": "Rain or Right (With Reference to Runway Designation)",
+  "R-AOE": "Regular Airport of Entry",
+  "R/T": "Radiotelephony",
+  "R/W": "Rotary/Wing",
+  "R04": "Runway 4",
+  "RA": "Rain",
+  "RABA": "No Rawin Observation, No Balloos Available",
+  "RABAL": "Radiosonde Balloon Wind Data",
+  "RABAR": "Radiosonde Balloon Release",
+  "RACO": "No Rawin Observation, Communications Out",
+  "RACON": "Radar Beacon",
+  "rad": "radius, radial",
+  "RADAT": "Radiosonde Observation Data",
+  "RADNO": "Report Missing Account Radio Failure",
+  "RAFI": "Radiosonde Observation Not Filed",
+  "RAFRZ": "Radiosonde Observation Freezing Levels",
+  "RAHE": "No Rawin Observation, No Gas Available",
+  "RAI": "Runway Alignment Indicator",
+  "RAICG": "Radiosonde Observation Icing At",
+  "RAIL": "Runway Alignment Indicator Lights",
+  "RAMCC": "Regional Air Movement Control Center",
+  "RAMOS": "Remote Automatic Meterological Observing System",
+  "RAOB": "Radiosonde Observation",
+  "RAOBS": "Radiosonde Observations",
+  "RAPCON": "Radar Approach Control (USAF)",
+  "RAPI": "Radiosonde Report Already Sent In Pibal Collection",
+  "RAREP": "Radar Weather Report",
+  "RASN": "Rain And Snow (Metar)",
+  "RATCF": "Radar Air Traffic Control Facility (Navy)",
+  "RAVU": "Radiosonde Analysis And Verification Unit",
+  "RAWE": "No Rawin Observation, Unfavorable Weather",
+  "RAWI": "No Rawin Observation, High And Gusty Winds",
+  "RAWIN": "Upper Winds Observation (By Radio Methods)",
+  "RCAG": "Remote Center Air to Ground Facility",
+  "RCAGL": "Remote Center Air to Ground Facility Long Range",
+  "RCC": "Rescue Coordination Center",
+  "RCD": "Radar Cloud Detection Report",
+  "RCDNA": "Radar Cloud Detection Report Not Available",
+  "RCDNE": "Radar Cloud Detection Report No Echoes Observed",
+  "RCDNO": "Radar Cloud Dectector Inoperative Due To Breakdown Until",
+  "RCDOM": "Radar Cloud Detector Inoperative Due To Maintenance Until",
+  "RCH": "Reach",
+  "RCHD": "Reached",
+  "RCHG": "Reaching",
+  "RCHS": "Reaches",
+  "RCKY": "Rocky",
+  "RCKYS": "Rockies",
+  "RCL": "runway centerline",
+  "RCLL": "Runway Centerline Light System",
+  "RCLM": "Runway Center Line Markings",
+  "RCLS": "Runway Centerline Light System",
+  "RCMD": "Recommend",
+  "RCMDD": "Recommended",
+  "RCMDG": "Recommending",
+  "RCMDS": "Recommends",
+  "RCO": "Remote Communications Outlet",
+  "rcpt": "reception",
+  "RCR": "Runway Condition Reading",
+  "RCRD": "Record",
+  "RCRDS": "Records",
+  "RCV": "Receive",
+  "RCVD": "Received",
+  "RCVG": "Receiving",
+  "rcvr": "receiver",
+  "RCVS": "Receives",
+  "RDC": "Reduce",
+  "RDG": "Ridge",
+  "RDGG": "Ridging",
+  "rdo": "radio",
+  "RDR": "Radar",
+  "RDVLP": "Redevelop",
+  "RDVLPG": "Redeveloping",
+  "RDVLPMT": "Redevelopment",
+  "RDWND": "Radar Dome Wind",
+  "RE": "Regard",
+  "REC": "Receive/receiver",
+  "RECON": "Reconnaissance",
+  "reconst": "reconstruct",
+  "REDL": "Runway Edge Light",
+  "REF": "Reference",
+  "reful": "refueling",
+  "reg": "regulation, regular",
+  "REIL": "Runway End Identifier Lights",
+  "rel": "reliable",
+  "RELC": "Relocated",
+  "relctd": "relocated",
+  "RENL": "Runway End Identifier Lights",
+  "REP": "Reporting Point",
+  "REPL": "Replace",
+  "REPLD": "Replaced",
+  "REPLG": "Replacing",
+  "REPLS": "Replaces",
+  "REQ": "Request",
+  "REQS": "Requests",
+  "REQSTD": "Requested",
+  "RES": "Reserve",
+  "RESP": "Response",
+  "RESTR": "Restrict",
+  "RETIL": "Rapid Exit Taxiway Indicator Light",
+  "RGD": "Ragged",
+  "RGL": "Regional Model",
+  "RGLR": "Regular",
+  "RGN": "Region",
+  "Rgnl": "Regional",
+  "RGNS": "Regions",
+  "RGT": "Right",
+  "rgt tfc": "right traffic",
+  "RH": "Relative Humidity",
+  "RHINO": "RHI Not Operative",
+  "RI": "Rhode Island",
+  "RIOGD": "Rio Grande",
+  "RL": "Runway Light",
+  "RLBL": "Reliable",
+  "rlgd": "realigned",
+  "RLLS": "Runway Lead-in Light System",
+  "RLTV": "Relative",
+  "RLTVLY": "Relatively",
+  "RM": "Remarks (Pirep)",
+  "RMK": "Remarks",
+  "RMN": "Remain",
+  "RMND": "Remained",
+  "RMNDR": "Remainder",
+  "RMNG": "Remaining",
+  "RMNS": "Remains",
+  "RNAV": "Area Navigation",
+  "RNFL": "Rainfall",
+  "rng": "range, radio range",
+  "RNP": "Required Navigation Performance",
+  "ROBEPS": "Radar Operating Below Prescribed Standard",
+  "ROC": "Rate Of Climb",
+  "RON": "Remain Overnight",
+  "ROT": "Rotate",
+  "Rot Lt or Bcn": "Rotating Light or Beacon",
+  "ROTD": "Rotated",
+  "ROTG": "Rotating",
+  "ROTS": "Rotates",
+  "RPD": "Rapid",
+  "RPDLY": "Rapidly",
+  "RPI": "Runway Point of Intercept",
+  "RPLC": "Replace",
+  "RPLCD": "Replaced",
+  "RPLCG": "Replacing",
+  "RPLCS": "Replaces",
+  "RPRT": "Report",
+  "RPRTD": "Reported",
+  "RPRTG": "Reporting",
+  "RPRTS": "Reports",
+  "RPT": "Repeat or report",
+  "RPTG": "Repeating",
+  "RPTS": "Repeats",
+  "RQR": "Require",
+  "RQRD": "Required",
+  "RQRG": "Requiring",
+  "RQRS": "Requires",
+  "RR": "Railroad",
+  "RRL": "Runway Remaining Lights",
+  "RRP": "Runway Reference Point",
+  "RS": "Receiver Station",
+  "RSC": "Runway Surface Condition",
+  "RSDU": "Radar Storm Detection Unit",
+  "RSE": "Runway Starter Extension/Starter Strip",
+  "RSG": "Rising",
+  "RSN": "Reason",
+  "RSNG": "Reasoning",
+  "RSNS": "Reasons",
+  "RSR": "En Route Surveillance Radar",
+  "RSRS": "Reduced Same Runway Separation",
+  "rstd": "restricted",
+  "RSTR": "Restrict",
+  "RSTRD": "Restricted",
+  "RSTRG": "Restricting",
+  "RSTRS": "Restricts",
+  "RSVN": "Reservation",
+  "RT": "Right Turn",
+  "RTD": "Routine Delayed",
+  "RTE": "Route",
+  "RTFQ": "Read The Freaking Question",
+  "RTOW": "Regulated Takeoff Weight — operational takeoff limit based on runway length, temperature, altitude, and performance factors",
+  "RTR": "Remote Transmitter/receiver",
+  "RTRN": "Return",
+  "RTRND": "Returned",
+  "RTRNG": "Returning",
+  "RTRNS": "Returns",
+  "RTS": "Return To Service",
+  "RUF": "Rough",
+  "RUFLY": "Roughly",
+  "RVR": "Runway Visual Range",
+  "RVRM": "Runway Visual Range Midpoint",
+  "RVRNO": "Runway Visual Range Not Available",
+  "RVRR": "Runway Visual Range Rollout",
+  "RVRT": "Runway Visual Range Touchdown",
+  "RVS": "Revise",
+  "RVSD": "Revised",
+  "RVSG": "Revising",
+  "RVSM": "Reduced Vertical Separation Minimum",
+  "RVSS": "Revises",
+  "RVV": "Runway Visbility Values",
+  "RW": "Rain Shower",
+  "RWY": "Runway",
+  "RY/RWY": "Runway",
+  "S": "South",
+  "S/D": "Seadrome",
+  "SA": "Surface Observation or Sand",
+  "SALS": "Short Approach Lighting System",
+  "SALSF": "Short Approach Light Wystem With Sequeced Flashing Lights",
+  "SAO": "Surface Observation",
+  "SAOS": "Surface Observations",
+  "SAR": "Search and Rescue",
+  "SASK": "Saskatchewan",
+  "SAT": "Static Air Temperature",
+  "SATCPM": "Satellite Voice Air Ground Calling",
+  "SATFY": "Satisfactory",
+  "SAVASI": "Simplified Abbreviated Visual Approach Slope Indicator",
+  "SAWRS": "Supplement Aviation Weather Reporting Station",
+  "SAWS": "Standalone Weather Sensor System",
+  "SB": "Southbound",
+  "SBB": "Single Sideband",
+  "SBND": "South Bound",
+  "SBSD": "Subside",
+  "SBSDD": "Subsided",
+  "SBSDNC": "Subsidence",
+  "SBSDS": "Subsides",
+  "sby": "standby",
+  "SC": "South Carolina",
+  "SCA": "Southern Control Area",
+  "SCAS": "Stability and Control Augmentation System",
+  "Sched": "scheduled services",
+  "SCND": "Second",
+  "SCNDRY": "Secondary",
+  "SCOB": "Scattered Clouds Or Better",
+  "SCSL": "Standing Lenticular Stratocumulus",
+  "SCT": "Scattered Cloud Layer (3/8ths to 4/8ths coverage)",
+  "SCTD": "Scattered",
+  "SCTR": "Sector",
+  "SD": "South Dakota",
+  "SDF": "Simplified Directional Facility",
+  "SE": "Southeast",
+  "SEC": "second, section",
+  "secd": "secondary",
+  "SELCAL": "Selective Calling System",
+  "SELF": "Strategic Expeditionary Landing Field",
+  "SELS": "Severe Local Storms Unit",
+  "SELY": "Southeasterly",
+  "SEng": "Single Engine",
+  "Sep": "September",
+  "SEPN": "Separation",
+  "SEQ": "Sequence",
+  "SERN": "Southeastern",
+  "SEV": "Severe (Icao)",
+  "SEW": "Standard Empty Weight — includes manufacturer’s empty weight plus full operating fluids (oil, hydraulic fluid) and unusable fuel",
+  "SEWD": "Southeastward",
+  "SFA": "Single Frequency Approach",
+  "SFB": "Space Force Base",
+  "SFC": "Surface",
+  "SFC VIS": "Surface Visibility",
+  "SFERICS": "Atmospherics",
+  "SFL": "Sequence Flashing Lights",
+  "SFRA": "Special Flight Rules Area",
+  "SG": "Snow Grains",
+  "SGD": "Solar-geophysical Data",
+  "SGFNT": "Significant",
+  "SGFNTLY": "Significantly",
+  "SH": "Shower(s)",
+  "SHFT": "Shift",
+  "SHFTD": "Shifted",
+  "SHFTG": "Shifting",
+  "SHFTS": "Shifts",
+  "SHGR": "Hail Showers",
+  "SHGS": "Small Hail Showers",
+  "SHLD": "Shield",
+  "SHLW": "Shallow",
+  "SHRA": "Rain Showers",
+  "SHRT": "Short",
+  "SHRTLY": "Shortly",
+  "SHRTWV": "Shortwave",
+  "SHRTWVS": "Shortwaves",
+  "SHSN": "Snow Showers",
+  "SHUD": "Should",
+  "SHWR": "Shower",
+  "SHWRS": "Showers",
+  "SID": "Standard Instrument Departure",
+  "SIDA": "Secure Identification Display Area",
+  "SIERNEV": "Sierra Nevada",
+  "SIF": "Selective Identification Feature",
+  "SIG": "Significant",
+  "SIGMET": "Significant Meteorological Information",
+  "SIMUL": "Simultaneous",
+  "SIR": "Packed Or Compacted Snow And Ice On Runways",
+  "SIWL": "Single Isolated Wheel Load",
+  "SK": "Sky Cover (Pirep)",
+  "SKC": "Sky Clear (Manual Observation)",
+  "SKD": "Scheduled",
+  "SKED": "Schedule",
+  "SLD": "Solid",
+  "SLGT": "Slight",
+  "SLGTLY": "Slightly",
+  "SLO": "Slow",
+  "SLOLY": "Slowly",
+  "SLOR": "Slower",
+  "SLP": "Sea Level Pressure (Add 10 to Numbers Given)",
+  "SLPG": "Sloping",
+  "SLPNO": "Sea Level Pressure Not Available",
+  "SLR": "Slush On Runway(s)",
+  "SLT": "Sleet",
+  "SLY": "Southerly",
+  "SM": "Statute Miles",
+  "SMGCS": "Surface Movement Guidance And Control System",
+  "SMH": "Shaking My Head",
+  "SMK": "Smoke",
+  "SML": "Small",
+  "SMLR": "Smaller",
+  "SMRY": "Summary",
+  "SMS": "Synchronus Meteorological Satellite",
+  "SMTH": "Smooth",
+  "SMTHR": "Smoother",
+  "SMTHST": "Smoothest",
+  "SMTM": "Sometime",
+  "SMWHT": "Somewhat",
+  "SN": "Snow",
+  "SNBNK": "Snow Bank",
+  "SND": "Sand",
+  "SNFLK": "Snow Flake",
+  "SNGL": "Single",
+  "SNINCR": "Snow Increasing Rapidly",
+  "SNOINCR": "Snow Increase",
+  "SNOINCRG": "Snow Increasing",
+  "SNST": "Sunset",
+  "SNW": "Snow",
+  "SNWFL": "Snowfall",
+  "SOAP": "Spectrometric Oil Analysis Program",
+  "SOC": "Start Of Climb",
+  "SODALS": "Simplified Omnidirectional Approach Lighting System",
+  "SOF": "Supervisor of Flying",
+  "SOP": "Standard Operating Procedure",
+  "SP": "Snow Pellets",
+  "SPB": "Seaplane Base",
+  "SPCLY": "Especially",
+  "SPD": "Speed",
+  "SPDS": "Speeds",
+  "SPECI": "Aviation Selected Special Weather Report",
+  "SPENES": "Satellite Precipitation Estimate Statement",
+  "SPKL": "Sprinkle",
+  "SPKLS": "Sprinkles",
+  "SPLNS": "Southern Plains",
+  "SPRD": "Spread",
+  "SPRDG": "Spreading",
+  "SPRDS": "Spreads",
+  "SPRL": "Spiral",
+  "SQ": "Squalls (Moderate)",
+  "SQAL": "Squall",
+  "SQLN": "Squall Line",
+  "SR": "Sunrise",
+  "SR-SS": "Sunrise Sunset",
+  "SRA": "Surveillance Radar Approach",
+  "SRE": "Surveillance Radar Element of GCA (Instrument Approach Procedures Identification only)",
+  "SRN": "Southern",
+  "SRND": "Surround",
+  "SRNDD": "Surrounded",
+  "SRNDG": "Surrounding",
+  "SRNDS": "Surrounds",
+  "SS": "Sunset or Sandstorm",
+  "SSALF": "Simplified Short Approach Light System With Sequenced Flashing Lights",
+  "SSALR": "Simplified Short Approach Light System With Runway Alignment Indicator Lights",
+  "SSALS": "Simplified Short Approach Light System",
+  "SSALS/R": "Simplified Short Approach Lighting System/with RAIL",
+  "SSB": "Single Sideband",
+  "SSE": "South-Southeast",
+  "SSELY": "South-Southeasterly",
+  "SSERN": "South-Southeastern",
+  "SSEWD": "South-Southeastward",
+  "SSR": "Secondary Surveillance Radar",
+  "SSW": "South-Southwest",
+  "SSWLY": "South-Southwesterly",
+  "SSWRN": "South-Southwestern",
+  "SSWWD": "South-Southwestward",
+  "ST": "Stratus",
+  "ST-IN": "Straight In",
+  "STA": "Straight-in Approach",
+  "STAGN": "Stagnation",
+  "STAR": "Standard Terminal Arrival Route",
+  "STBL": "Stable",
+  "STBLTY": "Stability",
+  "STD": "Standard",
+  "STDY": "Steady",
+  "STFR": "Stratus Fractus",
+  "STFRA": "Stratus Fractus",
+  "STFRM": "Stratiform",
+  "STG": "Strong",
+  "STGLY": "Strongly",
+  "STGR": "Stronger",
+  "STGST": "Strongest",
+  "STLT": "Satellite",
+  "STM": "Storm",
+  "STMS": "Storms",
+  "STN": "Station",
+  "STNRY": "Stationary",
+  "STNS": "Stations",
+  "STOL": "Short Take Off And Landing",
+  "stor": "storage",
+  "str-in": "Straight-in",
+  "stu": "student",
+  "sUAS": "small Unmanned Aerial Systems",
+  "SUB": "Substitute",
+  "subj": "subject",
+  "SUBTRPCL": "Subtropical",
+  "sum": "summer",
+  "SUN": "Sunday",
+  "sur": "surround",
+  "survl": "survival, surveillance",
+  "suspd": "suspended",
+  "svc": "service",
+  "svcg": "servicing",
+  "SVN": "Satellite Vehicle Number",
+  "SVR": "Severe",
+  "SVRL": "Several",
+  "SW": "Southwest",
+  "SWD": "Southward",
+  "SWEPT": "Swept Or Broom/broomed",
+  "SWL": "Single Wheel Load (max weight in lbs)",
+  "SWLG": "Swelling",
+  "SWLY": "Southwesterly (Weather Reports Only)",
+  "SWRN": "Southwestern (Weather Reports Only)",
+  "SWS": "Surface Weather System",
+  "SWWD": "Southwestward",
+  "SX": "Stability Index",
+  "SXN": "Section",
+  "SYNOP": "Synoptic",
+  "SYNS": "Synopsis",
+  "sys": "system",
+  "T": "Thunder",
+  "TA": "Transition Altitude",
+  "TAA": "Terminal Arrival Area",
+  "TAC": "Tactical Air Command",
+  "TACAN": "Tactical Air Navigation",
+  "TAF": "Terminal Aerodrome Forecast",
+  "TALCE": "Tanker Aircraft Control Element",
+  "TAR": "Terminal Area Surveillance Radar",
+  "TAS": "True Airspeed",
+  "TAWS": "Terrain Awareness Warning System",
+  "TB": "Turbulence (Pirep)",
+  "TCA": "Terminal Control Area",
+  "TCAS": "Traffic Collision Avoidance System",
+  "TCH": "Threshold Crossing Height",
+  "TCNTL": "Transcontinental",
+  "TCTA": "Transcontinental Control Area",
+  "TCU": "Towering Cumulus",
+  "TD": "Touchdown",
+  "TDA": "Today",
+  "TDWR": "Terminal Doppler Weather Radar",
+  "TDZ": "Touchdown Zone",
+  "TDZ LGT": "Touchdown Zone Lights",
+  "TDZE": "Touchdown Zone Elevation (highest elevation in the touchdown zone, feet MSL)",
+  "TDZL": "Touchdown Zone Lights",
+  "TEMP": "Temperature",
+  "TEMPO": "Temporarily (e.g., TEMPO 0002 = Temporarily from 00 to 02 Zulu)",
+  "TERPS": "Us Standard For Terminal Instrument Precedure",
+  "tfc": "traffic",
+  "TFR": "Temporary Flight Restriction",
+  "TGL": "Touch And Go Landings",
+  "THD": "Thunderhead",
+  "THDR": "Thunder",
+  "THK": "Thick",
+  "THKNG": "Thickening",
+  "THKNS": "Thickness",
+  "THKR": "Thicker",
+  "THKST": "Thickest",
+  "thld": "threshold",
+  "THN": "Thin",
+  "THNG": "Thinning",
+  "THNR": "Thinner",
+  "THNST": "Thinnest",
+  "thou": "thousand",
+  "THR": "Threshold",
+  "THRFTR": "Thereafter",
+  "THRU": "Through",
+  "THRUT": "Throughout",
+  "THSD": "Thousand",
+  "THTN": "Threaten",
+  "THTND": "Threatened",
+  "THTNG": "Threatening",
+  "THTNS": "Threatens",
+  "THU": "Thursday",
+  "TIBA": "Traffic Information Broadcast By Aircraft",
+  "TIL": "Until",
+  "tkf": "take-off",
+  "tkof": "take-off",
+  "TL": "Transition Level",
+  "TLv": "Transition Level",
+  "TM": "Time Pirep Received",
+  "TMA": "Terminal Control Area",
+  "TML": "Terminal",
+  "TMN": "Terminates",
+  "TMPA": "Traffic Management Program Alert",
+  "TMPRY": "Temporary",
+  "TMPRYLY": "Temporarily",
+  "TMW": "Tomorrow",
+  "TN": "Tennessee",
+  "TNDCY": "Tendency",
+  "TNDCYS": "Tendencies",
+  "TNGT": "Tonight",
+  "TNTV": "Tentative",
+  "TNTVLY": "Tentatively",
+  "TODA": "Takeoff Distance Available",
+  "TOP": "Cloud Top",
+  "TOPS": "Tops",
+  "TORA": "Takeoff Run Available",
+  "TOT": "Turbine Outlet Temperature",
+  "TOVC": "Top of Overcast",
+  "TOW": "Takeoff Weight — the actual aircraft weight at the start of the takeoff roll",
+  "TP": "Tire Pressure",
+  "TPA": "Traffic Pattern Altitude",
+  "TPG": "Topping",
+  "TR": "Towering",
+  "TRACON": "Terminal Radar Approach Control (FAA)",
+  "tran": "transient",
+  "trans": "transmit",
+  "TRANS ALT": "Transitiion Altitude",
+  "TRANS LEV": "Transition Level",
+  "TRBL": "Trouble",
+  "TRCV": "Tri Color Visual Approach Slope Indicator",
+  "TRIB": "Tributary",
+  "TRKG": "Tracking",
+  "TRML": "Terminal",
+  "TRMT": "Terminate",
+  "TRMTD": "Terminated",
+  "TRMTG": "Terminating",
+  "TRMTS": "Terminates",
+  "trng": "training",
+  "trns": "transition",
+  "TRNSP": "Transport",
+  "TRNSPG": "Transporting",
+  "TROF": "Trough",
+  "TROFS": "Troughs",
+  "TROP": "Tropopause",
+  "TRPCD": "Tropical Continental",
+  "TRPCL": "Tropical",
+  "TRPLYR": "Trapping Layer",
+  "TRRN": "Terrain",
+  "TRSA": "Terminal Radar Service Area",
+  "TRSN": "Transition",
+  "TRW": "Thunderstorm",
+  "TRW+": "Thunderstorm with Heavy Rain Shower",
+  "TS": "Thunderstorm",
+  "TS+": "Thunderstorm with Heavy Precipitation",
+  "TSFR": "Transfer",
+  "TSFRD": "Transferred",
+  "TSFRG": "Transferring",
+  "TSFRS": "Transfers",
+  "TSGR": "Thunderstorm With Hail (Metar)",
+  "TSGS": "Thunderstorm With Small Hail (Metar)",
+  "TSHWR": "Thundershower",
+  "TSHWRS": "Thundershowers",
+  "TSNO": "Thunderstorm Information Not Available",
+  "TSNT": "Transient",
+  "TSPL": "Thunderstorm With Ice Pellets",
+  "TSQLS": "Thundersqualls",
+  "TSRA": "Thunderstorm With Rain (Metar)",
+  "TSSA": "Thunderstorm With Duststorm Or Sandstorm (Metar)",
+  "TSSN": "Thunderstorm With Snow (Metar)",
+  "TSTM": "Thunderstorm",
+  "TSTMS": "Thunderstorms",
+  "TSW": "Thunderstorm with Snow",
+  "TSW+": "Thunderstorm with Heavy Snow",
+  "TUE": "Tuesday",
+  "TURBC": "Turbulence",
+  "TURBT": "Turbulent",
+  "TV": "Television",
+  "TVOR": "Terminal Vor",
+  "TWD": "Toward",
+  "TWDS": "Towards",
+  "TWEB": "Transcribed Weather Broadcast",
+  "TWI": "Twilight",
+  "TWIP": "Terminal Weather Information For Pilots",
+  "TWR": "tower",
+  "TWR VIS": "Tower Visibility",
+  "TWRG": "Towering",
+  "twy": "taxiway",
+  "TX": "Texas",
+  "U": "Unicom",
+  "UA": "Routine Pirep (Pirep)",
+  "UACC": "Upper Area Control Center (used outside US)",
+  "UAG": "Upper Atmosphere Geophysics",
+  "UAS": "Unmanned Aerial Systems",
+  "UAV": "Unmanned Air Vehicles",
+  "UC": "Under Construction",
+  "UCN": "Urgent Change Notice",
+  "UDA": "Upper Advisory Area",
+  "UDDF": "Up and Down Drafts",
+  "UDF": "Ultra High Frequency Direction Finder",
+  "UFN": "until further notice",
+  "UHF": "Ultra High Frequency (300 to 3000 MHz)",
+  "UIR": "Upper Flight Information Region",
+  "UN": "Unable",
+  "una": "unable",
+  "unauthd": "unauthorized",
+  "UNAVBL": "Unavailable",
+  "UNCT'L": "Uncontrolled",
+  "unctl": "uncontrolled",
+  "UNEC": "Unnecessary",
+  "UNICOM": "Aeronautical Advisory Service",
+  "unk": "unknown",
+  "UNKN": "Unknown",
+  "UNL": "Unlimited",
+  "unlgtd": "unlighted",
+  "unltd": "unlimited",
+  "UNMKD": "Unmarked",
+  "UNMNT": "Unmonitored",
+  "unmrk": "unmarked",
+  "unmto": "unmonitored",
+  "unrel": "unreliable",
+  "UNRELBL": "Unreliable",
+  "UNRSTD": "Unrestricted",
+  "UNSATFY": "Unsatisfactory",
+  "UNSBL": "Unseasonable",
+  "unsked": "unscheduled",
+  "UNSTBL": "Unstable",
+  "UNSTDY": "Unsteady",
+  "UNSTL": "Unsettle",
+  "UNSTLD": "Unsettled",
+  "unsvc": "unserviceable",
+  "UNUSBL": "Unusable",
+  "unuse": "unusable",
+  "UP": "Unknown Precipitation",
+  "UPDFTS": "Updrafts",
+  "UPR": "Upper",
+  "UPSLP": "Upslope",
+  "UPSTRM": "Upstream",
+  "URG": "Urgent",
+  "USA": "United States Army",
+  "USAF": "United States Air Force",
+  "USB": "Upper Side Band",
+  "USBL": "Usable",
+  "USCG": "United States Coast Guard",
+  "USEFUL LOAD": "Total weight of fuel, passengers, baggage, and cargo the aircraft can carry, equal to maximum ramp weight minus basic empty weight",
+  "USMC": "United States Marine Corps",
+  "USN": "United States Navy",
+  "USSF": "United States Space Force",
+  "UT": "Utah",
+  "UTA": "Upper Control Area",
+  "UTC": "Coordinated Universal Time",
+  "UUA": "Urgent Pirep (Pirep)",
+  "UVV": "Upward Vertical Velocity",
+  "UVVS": "Upward Vertical Velocities",
+  "UWNDS": "Upper Winds",
+  "V": "Varying or Defense Switching Network (telephone, formerly AUTOVON) or Variable",
+  "V/STOL": "Vertical and Short Take-off and Landing aircraft",
+  "V/V": "Vertical Velocity",
+  "VA": "Volcanic Ash",
+  "VAL": "Visiting Aircraft Line",
+  "var": "variation (magnetic variation)",
+  "VARN": "Variation",
+  "VASI": "Visual Approach Slope Indicator",
+  "VC": "In the Vicinity",
+  "VCFG": "Fog In Vicinity (Metar)",
+  "VCNTY": "Vicinity",
+  "VCOT": "VFR Conditions on Top",
+  "VCTR": "Vector",
+  "VDF": "Very High Frequency Direction Finder",
+  "VDP": "Visual Descent Point",
+  "VDU": "Video Display Unit",
+  "VDUC": "VAS Data Utilization Center (NSSFC)",
+  "VE": "Visual Exempted",
+  "veh": "vehicle",
+  "vert": "vertical",
+  "VFR": "Visual Flight Rules",
+  "VFR-S": "FLIP VFR Supplement",
+  "VFY": "Verify",
+  "VFYD": "Verified",
+  "VFYG": "Verifying",
+  "VFYS": "Verifies",
+  "VGSI": "Visual Glide Slope Indicator",
+  "VHA": "Volcanic Hazard Area",
+  "VHF": "Very High Frequency (30 to 300 MHz)",
+  "VIA": "By Way Of",
+  "VICE": "Instead/versus",
+  "VIP": "Very Important Person",
+  "VIRGA": "Virga (Rain that Evaporates before Reaching the Ground)",
+  "VIS": "visibility",
+  "VISNO": "Visibility at Secondary Location Not Available",
+  "VLCTY": "Velocity",
+  "VLCTYS": "Velocities",
+  "VLNT": "Violent",
+  "VLNTLY": "Violently",
+  "VLY": "Valley",
+  "VLYS": "Valleys",
+  "VMC": "Visual Meteorological Conditions",
+  "VNAP": "Vertical Noise Abatement Procedures",
+  "VNAV": "Vertical Navigation",
+  "VOIP": "Voice Over Internet Protocol",
+  "VOL": "Volume",
+  "VOLMET": "Meteorological Information Aircraft In Flgiht",
+  "VOR": "VHF Omnidirectional Range",
+  "VORT": "Vorticity",
+  "VORTAC": "Vor And Tacan Co-located",
+  "VOT": "VOR Receiver Testing Facility",
+  "VPA": "Vertical Path Angle",
+  "VR": "Veer",
+  "VRB": "Variable",
+  "VRB VIS": "Variable Visibility",
+  "VRBL": "Variable",
+  "VRG": "Veering",
+  "VRISL": "Vancouver Island, BC",
+  "VRS": "Veers",
+  "VRT MOTN": "Vertical Motion",
+  "VRY": "Very",
+  "VSB": "Visible",
+  "VSBY": "Visibility",
+  "VSBYDR": "Visibility Decreasing Rapidly",
+  "VSBYIR": "Visibility Increasing Rapidly",
+  "VSI": "Vertical Speed Indicator",
+  "VT": "Vermont",
+  "VV": "Vertical Visibility",
+  "W": "West",
+  "W/O": "Without",
+  "W/P": "Area Navigation",
+  "WA": "Washington",
+  "WAA": "Warm Air Advection",
+  "WB": "Westbound",
+  "WBND": "West Bound",
+  "WCH": "Wheel Crossing Height",
+  "WDC-1": "World Data Centers In Western Europe",
+  "WDC-2": "World Data Centers Throughout Rest Of World",
+  "WDLY": "Widely",
+  "WDSPRD": "Widespread",
+  "WEA": "Weather",
+  "WED": "Wednesday",
+  "WEF": "With Effect From Or Effective From",
+  "WFO": "Weather Forecast Office",
+  "WFOS": "Weather Forecast Offices",
+  "WFP": "Warm Front Passage",
+  "Wg": "Wing",
+  "WI": "Wisconsin",
+  "WIBIS": "Will Be Issued",
+  "WIE": "with immediate effect",
+  "win": "winter",
+  "WINT": "Winter",
+  "WIP": "work in progress",
+  "WK": "Weak or week",
+  "wkd": "weekday",
+  "WKDAY": "Weekday",
+  "WKDAYS": "Monday Through Friday",
+  "WKEND": "Weekend",
+  "wkly": "weekly",
+  "WKN": "Weaken",
+  "WKNG": "Weakening",
+  "WKNS": "Weakens",
+  "WKR": "Weaker",
+  "WKST": "Weakest",
+  "WL": "Will",
+  "WLY": "Westerly",
+  "WME": "Wind Measuring Equipment",
+  "WMO": "World Meteorological Organization",
+  "WND": "Wind",
+  "WNDS": "Winds",
+  "wng": "warning",
+  "WNW": "West-Northwest",
+  "WNWLY": "West-Northwesterly",
+  "WNWRN": "West-Northwestern",
+  "WNWWD": "West-Northwestward",
+  "WO": "Without",
+  "WPLTO": "Western Plateau",
+  "WPT": "Waypoint",
+  "WR": "Inwet Runwaysert",
+  "WRM": "Warm",
+  "WRMFNT": "Warm Front",
+  "WRMFNTL": "Warm Frontal",
+  "WRMG": "Warming",
+  "WRMR": "Warmer",
+  "WRMST": "Warmest",
+  "WRN": "Western",
+  "WRNG": "Warning",
+  "WRNGS": "Warnings",
+  "WRS": "Worse",
+  "WS": "Wind Shear",
+  "WSFO": "Weather Service Forecast Office",
+  "WSFOS": "Weather Service Forecast Offices",
+  "WSHFT": "Wind Shift",
+  "WSHFTS": "Wind Shifts",
+  "WSO": "Weather Service Office",
+  "WSOM": "Weather Service Operations Manual",
+  "WSOS": "Weather Service Offices",
+  "WSP": "Weather System Processor",
+  "WSR": "Wet Snow On Runway(s)",
+  "WSTCH": "Wasatch Range",
+  "WSW": "West-Southwest",
+  "WSWLY": "West-Southwesterly",
+  "WSWRN": "West-Southwestern",
+  "WSWWD": "West-Southwestward",
+  "wt": "weight",
+  "WTR": "Water",
+  "WTRS": "Waters",
+  "WTSPT": "Waterspout",
+  "WTSPTS": "Waterspouts",
+  "WUD": "Would",
+  "WV": "West Virginia",
+  "WVS": "Waves",
+  "WW": "Severe Weather Watch",
+  "WWAMKC": "Status Report",
+  "WWD": "Westward",
+  "WWS": "Severe Weather Watches",
+  "WX": "Weather",
+  "WXCON": "Weather Reconnaissance Flight Pilot Report",
+  "WY": "Wyoming",
+  "X": "On Request",
+  "XCP": "Except",
+  "XPC": "Expect",
+  "XPCD": "Expected",
+  "XPCG": "Expecting",
+  "XPCS": "Expects",
+  "XPLOS": "Explosive",
+  "XTND": "Extend",
+  "XTNDD": "Extended",
+  "XTNDG": "Extending",
+  "XTRM": "Extreme",
+  "XTRMLY": "Extremely",
+  "Y": "Yukon Standard Time (Time Groups Only)",
+  "Y/S": "Unservicable",
+  "yd": "yard",
+  "YDA": "Yesterday",
+  "YKN": "Yukon",
+  "YLSTN": "Yellowstone",
+  "yr": "year",
+  "Z": "Greenwich Mean Time (time groups only)",
+  "ZFW": "Zero Fuel Weight — the sum of operating empty weight and payload, excluding usable fuel",
+  "ZI": "Zone Of Interior",
+  "ZL": "Freezing Drizzle",
+  "ZN": "Zone",
+  "ZNS": "Zones",
+  "ZR": "Freezing Rain"
+};
+
+// Build an uppercase-key version of the dictionary so lookups are case-insensitive
+const ABBR = Object.fromEntries(
+  Object.entries(abbreviations).map(([k, v]) => [k.toUpperCase(), v])
+);
+
+function decodeMETARCode() {
+    const raw = document.getElementById("abbreviation").value.trim();
+    // Normalize any fancy dashes and convert to uppercase
+    const input = raw.replace(/[\u2012-\u2015]/g, "-").toUpperCase();
+    let output = "";
+
+    // Abbreviation Lookup
+    if (ABBR[input]) {
+        output = ABBR[input];
+    }
+
+    // Zulu time (single) or Zulu range (start-end), e.g. "1430Z", "14Z", "0030Z-0730Z", "00Z-06Z"
+    else if (/^\s*\d{2}(\d{2})?Z(\s*-\s*\d{2}(\d{2})?Z?)?\s*$/i.test(input)) {
+    // Normalize like "HHMMZ-HHMMZ"
+    const norm = input.replace(/\s+/g, "").toUpperCase();
+    const m = norm.match(/^(\d{2})(\d{2})?Z(?:-(\d{2})(\d{2})?Z?)?$/);
+
+    const toMinutes = (hh, mm) => {
+        const H = parseInt(hh, 10);
+        const M = mm ? parseInt(mm, 10) : 0;
+        if (H > 23 || M > 59) return null;
+        return H * 60 + M;
+    };
+
+    const startUTCmin = toMinutes(m[1], m[2]);
+    const endUTCmin   = m[3] ? toMinutes(m[3], m[4]) : null;
+    if (startUTCmin === null || (m[3] && endUTCmin === null)) {
+        output = "Invalid Zulu time.";
+    } else {
+        // Build a UTC date 'today' at 00:00, then add minutes
+        const now = new Date();
+        // "UTC midnight today" anchor
+        const utcMidnight = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 0, 0, 0, 0);
+
+        const toLocalParts = (utcMinutes) => {
+        // Allow values >= 1440 for wrap to next day
+        const d = new Date(utcMidnight + utcMinutes * 60_000);
+        const opts = { hour: "numeric", minute: "2-digit", hour12: true };
+        const timeStr = d.toLocaleTimeString([], opts);
+        // Day label relative to *local* today
+        const localToday = new Date();
+        const sameDay =
+            d.getFullYear() === localToday.getFullYear() &&
+            d.getMonth() === localToday.getMonth() &&
+            d.getDate() === localToday.getDate();
+        let dayTag = sameDay ? "Today" : (d > localToday ? "Tomorrow" : "Yesterday");
+        return { timeStr, dayTag, date: d };
+        };
+
+        if (endUTCmin == null) {
+        // Single time
+        const { timeStr, dayTag } = toLocalParts(startUTCmin);
+        output = `${norm} = ${timeStr} local (${dayTag}).`;
+        } else {
+        // Range. If end < start, wrap across midnight (+24h)
+        let start = startUTCmin;
+        let end = endUTCmin;
+        if (end < start) end += 24 * 60;
+
+        const s = toLocalParts(start);
+        const e = toLocalParts(end);
+
+        // If local dates differ, show both tags; otherwise compress
+        const dayNote = s.dayTag === e.dayTag ? s.dayTag : `${s.dayTag} → ${e.dayTag}`;
+        output = `${m[1]}${m[2] ? m[2] : ""}Z–${m[3]}${m[4] ? m[4] : ""}Z = ${s.timeStr}–${e.timeStr} local (${dayNote}).`;
+        }
+    }
+    }
+
+    // Oxygen service codes — supports "OX 1", "OX1,2", "OX 1, 3, 4" without repeating the main phrase
+    else if (/^\s*OX(?:\s*[- ]?\s*(\d(?:\s*,\s*\d)*))?\s*$/i.test(input)) {
+    const oxygenTypes = {
+        1: "gaseous oxygen service",
+        2: "liquid oxygen (LOX) service",
+        3: "high-pressure replacement bottles",
+        4: "low-pressure service"
+    };
+
+    let match = input.match(/^\s*OX(?:\s*[- ]?\s*(\d(?:\s*,\s*\d)*))?\s*$/i);
+    let nums = match[1] ? match[1].split(/\s*,\s*/) : [];
+
+    if (nums.length === 0) {
+        output = "Oxygen available (type not specified)";
+    } else {
+        let descriptions = nums.map(n => oxygenTypes[n] || `unknown type ${n}`);
+        output = `Oxygen available — ${descriptions.join(" and ")}`;
+    }
+    }
+
+    // Complex multiple phenomena timing decoder (e.g., TSE06B11RAB10GRB34E47GSB47)
+    else if (/^(?:[A-Z]{2,4}(?:B\d{2}(?:E\d{2})?)+)+$/i.test(input)) {
+        const wxType = {
+            TS: "Thunderstorm",
+            RA: "Rain",
+            SN: "Snow",
+            FZRA: "Freezing Rain",
+            FZDZ: "Freezing Drizzle",
+            DZ: "Drizzle",
+            PL: "Ice Pellets",
+            SG: "Snow Grains",
+            GR: "Hail",
+            GS: "Small Hail/Snow Pellets",
+            UP: "Unknown Precipitation"
+        };
+
+        const chunks = input.match(/[A-Z]{2,4}(?:B\d{2}(?:E\d{2})?)+/gi) || [];
+        const parts = chunks.map(chunk => {
+            const typeMatch = chunk.match(/^([A-Z]{2,4})/i);
+            const type = typeMatch ? typeMatch[1].toUpperCase() : "UNK";
+            const segs = chunk.match(/B\d{2}|E\d{2}/g) || [];
+            let text = `${wxType[type] || type} timing:`;
+            let lastStart = null;
+
+            segs.forEach(seg => {
+                const min = parseInt(seg.slice(1), 10);
+                if (seg.startsWith("B")) lastStart = min;
+                else if (seg.startsWith("E")) {
+                    if (lastStart !== null) {
+                        text += ` began at ${String(lastStart).padStart(2, '0')} and ended at ${String(min).padStart(2, '0')} minutes past the hour.`;
+                        lastStart = null;
+                    } else {
+                        text += ` ended at ${String(min).padStart(2, '0')} minutes past the hour.`;
+                    }
+                }
+            });
+
+            if (lastStart !== null)
+                text += ` began at ${String(lastStart).padStart(2, '0')} minutes past the hour.`;
+
+            return text;
+        });
+
+        output = parts.join("\n");
+    }
+
+    // Thunderstorm and Rain Beginning/Ending Times
+    else if (/^(TS|RA)(B|E)\d{2}$/i.test(input)) {
+    const match = input.match(/^([A-Z]{2})(B|E)(\d{2})$/i);
+    const phenomena = match[1].toUpperCase() === "TS" ? "Thunderstorm" :
+                        match[1].toUpperCase() === "RA" ? "Rain" : match[1];
+    const action = match[2].toUpperCase() === "B" ? "began" : "ended";
+    const minutes = match[3];
+    output = `${phenomena} ${action} at ${minutes} minutes past the hour`;
+    }
+
+    // Combo case like “TSB27RAB27” — multiple events joined together
+    else if (/^(TS[BE]\d{2}RA[BE]\d{2})$/i.test(input)) {
+    const parts = input.match(/(TS[BE]\d{2})|(RA[BE]\d{2})/gi);
+    if (parts) {
+        const decodedParts = parts.map(p => {
+        const m = p.match(/^([A-Z]{2})(B|E)(\d{2})$/i);
+        const ph = m[1].toUpperCase() === "TS" ? "Thunderstorm" :
+                    m[1].toUpperCase() === "RA" ? "Rain" : m[1];
+        const act = m[2].toUpperCase() === "B" ? "began" : "ended";
+        return `${ph} ${act} at ${m[3]} minutes past the hour`;
+        });
+        output = decodedParts.join("; ");
+    }
+    }
+
+    // Service code (e.g., S4, S7, Service: S5, etc.)
+    else if (/^(Service:\s*)?S\d+$/i.test(input)) {
+        const arffCategories = {
+            1: { length: "26 ft (8 m)", width: "up to 2 m" },
+            2: { length: "39 ft (12 m)", width: "up to 2 m" },
+            3: { length: "78 ft (24 m)", width: "up to 4 m" },
+            4: { length: "98 ft (30 m)", width: "up to 4 m" },
+            5: { length: "126 ft (38 m)", width: "up to 5 m" },
+            6: { length: "150 ft (46 m)", width: "up to 5 m" },
+            7: { length: "175 ft (53 m)", width: "up to 5 m" },
+            8: { length: "200 ft (61 m)", width: "up to 7 m" },
+            9: { length: "250 ft (76 m)", width: "up to 7 m" },
+            10: { length: ">250 ft (>76 m)", width: "over 7 m" }
+        };
+
+        let match = input.match(/S(\d+)/i);
+        let category = parseInt(match[1], 10);
+
+        if (arffCategories[category]) {
+            output = `Airport Services — ARFF Category ${category}: firefighting capability for aircraft up to ${arffCategories[category].length} in length and ${arffCategories[category].width} in fuselage width.`;
+        } else {
+            output = `Unknown ARFF category: ${category}`;
+        }
+    }
+
+    // Runway declared distances (e.g., TORA-7599, TODA-8000, ASDA-7900, LDA-7400)
+    else if (/^(TORA|TODA|ASDA|LDA)-\d+$/i.test(input)) {
+        const declaredTypes = {
+            "TORA": "Takeoff Run Available",
+            "TODA": "Takeoff Distance Available",
+            "ASDA": "Accelerate-Stop Distance Available",
+            "LDA": "Landing Distance Available"
+        };
+
+        let parts = input.split("-");
+        let code = parts[0].toUpperCase();
+        let distance = parseInt(parts[1], 10);
+
+        output = `${declaredTypes[code]} — ${distance} feet`;
+    }
+
+    // H12004X200
+    else if (/^H?\d{3,5}X\d{2,3}$/i.test(input)) {
+        let match = input.match(/^(H?)(\d{3,5})X(\d{2,3})$/i);
+        let heli = match[1] ? " (Helicopter capable)" : "";
+        output = `Runway ${match[2]} ft long by ${match[3]} ft wide${heli}`;
+    }
+
+    // 2S-175
+    else if (/^\dS-\d{1,3}$/i.test(input)) {
+        let parts = input.split("-");
+        let segment = parts[0][0]; // first digit (e.g., "2")
+        let slopeValue = (parseInt(parts[1]) / 100).toFixed(2);
+        output = `Second slope segment: uphill ${slopeValue}%`;
+    }
+
+    // S-90
+    else if (/^S-\d{1,3}$/i.test(input)) {
+        let slope = (parseInt(input.split("-")[1]) / 100).toFixed(2);
+        output = `Slope of -${slope}%`;
+    }
+
+    // D-160
+    else if (/^D-\d{1,3}$/i.test(input)) {
+        let slope = (parseInt(input.split("-")[1]) / 100).toFixed(2);
+        output = `Downward slope of ${slope}%`;
+    }
+
+    // 2D-300
+    else if (/^2D-\d{1,3}$/i.test(input)) {
+        let slope = (parseInt(input.split("-")[1]) / 100).toFixed(2);
+        output = `Second downward slope of ${slope}%`;
+    }
+
+    // PCN 80 R/B/W/T
+    else if (/^PCN\s?\d+\s?[A-Z/]+$/i.test(input)) {
+        output = "Pavement Classification Number: load-carrying capacity and pavement type";
+    }
+
+    // R/B/W/T
+    else if (/^R\/B\/W\/T$/i.test(input)) {
+        output = "Rigid pavement, high strength, tire pressure unlimited, technical evaluation";
+    }
+
+    else if (/^F\/A\/W\/T$/i.test(input)) {
+        output = "Flexible pavement, medium strength, tire pressure unlimited, technical evaluation";
+    }
+
+    // First half: PCR + number
+    else if (/^PCR\s?\d+$/i.test(input)) {
+        let rating = input.match(/\d+/)[0];
+        output = `Pavement Classification Rating ${rating}`;
+    }
+
+    // First half: PCN + number
+    else if (/^PCN\s?\d+$/i.test(input)) {
+        let rating = input.match(/\d+/)[0];
+        output = `Pavement Classification Number ${rating}`;
+    }
+
+    // Second half: Pavement type/strength/pressure/evaluation code
+    else if (/^[A-Z](\/[A-Z])+$/i.test(input)) {
+        const codeMeanings = {
+            "R": "Rigid pavement",
+            "F": "Flexible pavement",
+            "A": "High strength",
+            "B": "Medium strength",
+            "C": "Low strength",
+            "W": "Tire pressure unlimited",
+            "X": "Tire pressure limited",
+            "T": "Technical evaluation",
+            "U": "Using aircraft experience",
+        };
+
+        let parts = input.toUpperCase().split("/");
+        let decoded = parts.map(p => codeMeanings[p] || p);
+        output = decoded.join(", ");
+    }
+
+    // Full line: PCR/PCN + number + code
+    else if (/^(PCR|PCN)\s?\d+\s?[A-Z](\/[A-Z])+$/i.test(input)) {
+        let match = input.match(/^(PCR|PCN)\s?(\d+)\s?([A-Z](?:\/[A-Z])+)$|i/);
+        let type = match[1].toUpperCase() === "PCR" ? "Pavement Classification Rating" : "Pavement Classification Number";
+        let rating = match[2];
+        let code = match[3];
+
+        const codeMeanings = {
+            "R": "Rigid pavement",
+            "F": "Flexible pavement",
+            "A": "High strength",
+            "B": "Medium strength",
+            "C": "Low strength",
+            "W": "Tire pressure unlimited",
+            "X": "Tire pressure limited",
+            "T": "Technical evaluation",
+            "U": "Using aircraft experience",
+        };
+
+        let decodedParts = code.split("/").map(p => codeMeanings[p] || p);
+        output = `${type} ${rating} — ${decodedParts.join(", ")}`;
+    }
+
+
+    else if (/^PCR$/i.test(input)) {
+        output = "Precision runway markings";
+    }
+    else if (/^AUW$/i.test(input)) {
+        output = "Aircraft Under Weight limit applies";
+    }
+
+    // PAPI with configuration (e.g., PAPI(P4L), PAPI(P2R))
+    else if (/^PAPI\((P\d[L|R])\)$/i.test(input)) {
+        let config = input.match(/^PAPI\((P\d[L|R])\)$/i)[1].toUpperCase();
+        let lights = config[1];
+        let side = config[2] === "L" ? "left" : "right";
+        output = `Precision Approach Path Indicator — ${lights}-light system, ${side} side of runway`;
+    }
+
+    // Just the config part (P4L, P2R, etc.)
+    else if (/^P\d[L|R]$/i.test(input)) {
+        let lights = input[1];
+        let side = input[2].toUpperCase() === "L" ? "left" : "right";
+        output = `${lights}-light Precision Approach Path Indicator, ${side} side of runway`;
+    }
+
+    // Visual guidance systems
+    else if (/^PAPI\(\dR?\)$/i.test(input)) {
+        let match = input.match(/^PAPI\((\d)R?\)$/i);
+        let lights = match[1];
+        let side = input.toUpperCase().includes("R") ? "right" : "left";
+        output = `Precision Approach Path Indicator, ${lights}-light system, ${side} side of runway`;
+    }
+    else if (/^GA$/i.test(input)) { output = "General Aviation"; }
+    else if (/^TCH\s?\d{1,3}$/i.test(input)) {
+        let height = input.match(/\d+/)[0];
+        output = `Threshold Crossing Height of ${height} feet`;
+    }
+
+    // Threshold displacement
+    else if (/^Thld dsplcd\s?\d+'$/i.test(input)) {
+        let dist = input.match(/\d+/)[0];
+        output = `Threshold displaced by ${dist} feet`;
+    }
+
+    // FAA Inspection
+    else if (/^(FAA\s+INSPECTION|NOT\s+INSP\.?)$/i.test(input)) {
+        output = "FAA Inspection — all airports not inspected by the FAA will show the note 'Not insp.' This means the airport information was provided by the owner or operator of the field.";
+    }
+
+    // NOTAM FILE identifier, e.g., "NOTAM FILE BNA"
+    else if (/^NOTAM\s+FILE\s+[A-Z0-9]{3,4}$/i.test(input)) {
+        const match = input.match(/^NOTAM\s+FILE\s+([A-Z0-9]{3,4})$/i);
+        const ident = match[1].toUpperCase();
+        output = `NOTAM File Identifier — used for individual landing areas. For ${ident}, NOTAMs can be obtained via Flight Service (1-800-WX-BRIEF), FAA PilotWeb, or DINS for military NOTAMs.`;
+    }
+
+    // Chart Supplement Location Code (e.g., H-4G, L-19C, C-12A)
+    else if (/^[A-Z]-\d{1,3}[A-Z]$/i.test(input)) {
+        const match = input.match(/^([A-Z])-(\d{1,3})([A-Z])$/i);
+        if (match) {
+            const volLetter = match[1].toUpperCase();
+            const pageNum = match[2];
+            const columnLetter = match[3].toUpperCase();
+
+            // Volume meaning map
+            const volumes = {
+                "A": "Northeast U.S.",
+                "B": "Southeast U.S.",
+                "C": "North Central U.S.",
+                "D": "South Central U.S.",
+                "E": "Northwest U.S.",
+                "F": "Southwest U.S.",
+                "G": "Pacific (Alaska, Hawaii, territories)",
+                "H": "Special Alaska/Hawaii section",
+                "J": "Special section or supplemental insert",
+                "K": "Special section or supplemental insert",
+                "L": "Special section or supplemental insert"
+            };
+
+            const volumeName = volumes[volLetter] || "Unknown/special volume";
+
+            output = `Chart Supplement location code: Volume ${volLetter} (${volumeName}), page ${pageNum}, column ${columnLetter}. This is the reference for where the airport appears in the printed Chart Supplement.`;
+        }
+    }
+
+    // ==============================
+    // CERTIFICATED AIRPORT (14 CFR PART 139) / ARFF / INDEX
+    // ==============================
+
+    // Generic Part 139 / Certificated Airport
+    else if (/^(14\s*CFR\s*PART\s*139|PART\s*139|CERTIFICATED\s*AIRPORT)$/i.test(input)) {
+        output = "Certificated Airport — governed by 14 CFR Part 139. Indicates airport classification (Class I–IV) and ARFF Index (A–E) for rescue and fire-fighting readiness.";
+    }
+
+    // Chart Supplement location grid references — e.g., "H-10I", "12J", "L-33A", "34G"
+    else if (/^\s*([A-Z]{1,2}-?)?\d{1,2}[A-Z]?\s*$/i.test(input)) {
+    // Normalize
+    let cleaned = input.trim().toUpperCase();
+
+    output = `Chart Supplement location grid reference: ${cleaned}`;
+    }
+
+    // Airport Class I–IV (seat-based authorization rules from the Chart Supplement table)
+    else if (/^CLASS\s*(I|II|III|IV)$/i.test(input)) {
+        const cls = input.match(/^CLASS\s*(I|II|III|IV)$/i)[1].toUpperCase();
+        if (cls === "I") {
+            output = "Class I — may serve: Scheduled air carrier with 31+ passenger seats; Unscheduled with 31+ seats; Scheduled with 10–30 seats.";
+        } else if (cls === "II") {
+            output = "Class II — may serve: Unscheduled air carrier with 31+ passenger seats; Scheduled with 10–30 seats.";
+        } else if (cls === "III") {
+            output = "Class III — may serve: Scheduled air carrier with 10–30 passenger seats.";
+        } else if (cls === "IV") {
+            output = "Class IV — may serve: Unscheduled air carrier with 31+ passenger seats.";
+        }
+    }
+
+    // Plain “ARFF” explanation
+    else if (/^ARFF$/i.test(input)) {
+        output = "ARFF — Aircraft Rescue and Fire Fighting. Part 139 requires specific vehicles, agents, and water for foam based on the ARFF Index (A–E).";
+    }
+
+    // ARFF Index A–E (accepts: INDEX C, ARFF INDEX D, INDEX:E, etc.)
+    else if (/^(ARFF\s*)?INDEX\s*[:\-]?\s*([A-E])$/i.test(input)) {
+        const idx = input.match(/^(?:ARFF\s*)?INDEX\s*[:\-]?\s*([A-E])$/i)[1].toUpperCase();
+        const bands = {
+            "A": { len: "< 90 ft",  dep: "≥1 daily",   agent: "500 lb Dry Chem OR Halon 1211 (alternate: 450 lb DC + 100 gal water for foam)" },
+            "B": { len: "≥ 90 and < 126 ft", dep: "≥5 daily (or <5 if next lower band)", agent: "Index A + 1,500 gal water for foam" },
+            "C": { len: "≥ 126 and < 159 ft", dep: "≥5 daily (or <5 if next lower band)", agent: "Index A + 3,000 gal water for foam" },
+            "D": { len: "≥ 159 and < 200 ft", dep: "≥5 daily (or <5 if next lower band)", agent: "Index A + 4,000 gal water for foam" },
+            "E": { len: "≥ 200 ft",           dep: "≥5 daily (or <5 if next lower band)", agent: "Index A + 6,000 gal water for foam" }
+        };
+        const b = bands[idx];
+        output = `ARFF Index ${idx} — based on largest air carrier aircraft length and average daily departures. Typical aircraft length band: ${b.len}. Scheduled departures threshold: ${b.dep}. Agent requirement: ${b.agent}.`;
+    }
+
+    // Quick lookups for seat-rule phrases (optional helpers)
+    else if (/^SCHEDULED\s*31\+(\s*SEATS)?$/i.test(input)) {
+        output = "Scheduled air carrier with 31+ passenger seats — requires Class I airport authorization.";
+    }
+    else if (/^UNSCHEDULED\s*31\+(\s*SEATS)?$/i.test(input)) {
+        output = "Unscheduled air carrier with 31+ passenger seats — may be served by Class I, Class II, or Class IV airports (see specific airport class).";
+    }
+    else if (/^SCHEDULED\s*(10\s*-\s*30|10\s*TO\s*30)(\s*SEATS)?$/i.test(input)) {
+        output = "Scheduled air carrier with 10–30 passenger seats — may be served by Class I, Class II, or Class III airports.";
+    }
+
+    // Airport of Entry / Landing Rights / Customs User Fee / ADCUS
+
+    // AOE — Airport of Entry
+    else if (/^(AOE|AIRPORT\s*OF\s*ENTRY)$/i.test(input)) {
+        output = "Airport of Entry — permission from U.S. Customs is not required to land. At least 1 hour advance notice of arrival is required.";
+    }
+
+    // LRA — Landing Rights Airport
+    else if (/^(LRA|LANDING\s*RIGHTS(\s*AIRPORT)?)$/i.test(input)) {
+        output = "Landing Rights Airport — permission to land must be obtained in advance from U.S. Customs. At least 1 hour advance notice of arrival is required.";
+    }
+
+    // US Customs User Fee Airport
+    else if (/^(US\s*CUSTOMS\s*USER\s*FEE(\s*AIRPORT)?|CUSTOMS\s*USER\s*FEE)$/i.test(input)) {
+        output = "U.S. Customs User Fee Airport — private aircraft operators are often required to pay costs associated with customs processing.";
+    }
+
+    // ADCUS — Flight Notification Service for Customs
+    else if (/^ADCUS$/i.test(input)) {
+        output = "ADCUS — Flight Notification Service for advising U.S. Customs. If shown in airport remarks, filing with ADCUS indicates this service; for LRA it serves as an application to land. The operator is responsible for ensuring Customs receives the notice.";
+    }
+
+    // AOE/LRA with explicit advance notice (e.g., 'AOE-1 HR', 'LRA: 90 MIN', 'AOE 2 HOURS')
+    else if (/^(AOE|LRA)\s*[-:]?\s*(\d{1,3})\s*(HR|HRS|HOUR|HOURS|MIN|MINS|MINUTES)$/i.test(input)) {
+        const m = input.match(/^(AOE|LRA)\s*[-:]?\s*(\d{1,3})\s*(HR|HRS|HOUR|HOURS|MIN|MINS|MINUTES)$/i);
+        if (m) {
+            const kind = m[1].toUpperCase();                  // AOE or LRA
+            const amount = parseInt(m[2], 10);
+            const unit = m[3].toUpperCase();
+            const minutes = /MIN/.test(unit) ? amount : amount * 60;
+
+            const label = kind === "AOE"
+                ? "Airport of Entry — permission not required to land"
+                : "Landing Rights Airport — permission required in advance";
+
+            const pretty =
+                minutes % 60 === 0
+                    ? `${minutes / 60} hour${minutes === 60 ? "" : "s"}`
+                    : `${minutes} minutes`;
+
+            output = `${label}. Advance notice of arrival required: at least ${pretty}.`;
+        }
+    }
+
+    // Combined token like "AOE/LRA"
+    else if (/^(AOE\s*\/\s*LRA|LRA\s*\/\s*AOE)$/i.test(input)) {
+        output = "AOE/LRA — Airport may be designated as Airport of Entry or Landing Rights. Check remarks for which applies and required advance notice.";
+    }
+
+    // Traffic Pattern Altitude (TPA)
+    // Matches: "TPA 1000", "TPA 1600 (1000)", "TPA-1000(800)", "TPA: 1400 (900)"
+    else if (/^TPA\s*[-:]?\s*\d{2,5}(?:\s*\(\s*\d{2,5}\s*\))?$/i.test(input)) {
+        const m = input.match(/^TPA\s*[-:]?\s*(\d{2,5})(?:\s*\(\s*(\d{2,5})\s*\))?$/i);
+        if (m) {
+            const tpaMSL = m[1];
+            const tpaAAL = m[2];
+
+            if (tpaAAL) {
+                output = `Traffic Pattern Altitude. ${tpaMSL} feet above mean sea level. ${tpaAAL} feet above airport elevation. TPA is only published if it differs from the AIM recommended altitude.`;
+            } else {
+                output = `Traffic Pattern Altitude. ${tpaMSL} feet above mean sea level. TPA is only published if it differs from the AIM recommended altitude.`;
+            }
+        }
+    }
+
+    // Airport Location – distance + 16-point compass (e.g., "3 N", "5.5 SW", "12 NNE", optional "NM")
+    else if (/^(\d+(?:\.\d+)?)\s*-?\s*(N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)(?:\s*NM)?$/i.test(input)) {
+        const match = input.match(/^(\d+(?:\.\d+)?)\s*-?\s*(N|NNE|NE|ENE|E|ESE|SE|SSE|S|SSW|SW|WSW|W|WNW|NW|NNW)(?:\s*NM)?$/i);
+        if (match) {
+            const distance = parseFloat(match[1]);
+            const dirAbbr = match[2].toUpperCase();
+
+            const dirText = {
+                N: "north",
+                NNE: "north-northeast",
+                NE: "northeast",
+                ENE: "east-northeast",
+                E: "east",
+                ESE: "east-southeast",
+                SE: "southeast",
+                SSE: "south-southeast",
+                S: "south",
+                SSW: "south-southwest",
+                SW: "southwest",
+                WSW: "west-southwest",
+                W: "west",
+                WNW: "west-northwest",
+                NW: "northwest",
+                NNW: "north-northwest"
+            }[dirAbbr] || dirAbbr;
+
+            const milesWord = distance === 1 ? "nautical mile" : "nautical miles";
+            const distanceStr = Number.isInteger(distance) ? String(distance) : String(distance);
+
+            output = `Airport is located ${distanceStr} ${milesWord} ${dirText} of the associated city center.`;
+        }
+    }
+
+    // Geographic Position of Airport — ARP (flex formats, written-out language)
+    else if (/[°º]/.test(input) && /[NS]/i.test(input) && /[EW]/i.test(input)) {
+        // Normalize symbols (includes acute accent minutes)
+        const txt = input
+        .replace(/[\u2012-\u2015]/g, "-")              // dashes → hyphen
+        .replace(/[°º]/g, "°")                         // degrees
+        .replace(/[’′\u2032\u02B9\u02BC\u00B4]/g, "'") // minutes (prime/apostrophe/acute)
+        .replace(/[”″\u2033]/g, '"')                   // seconds (double prime)
+        .replace(/\s*[,;]\s*/g, ",")                   // separators
+        .replace(/\s+/g, " ")
+        .trim();
+
+        function writeLatLon(latDeg, latMin, latSec, latH, lonDeg, lonMin, lonSec, lonH) {
+            let latText = `${latDeg} degree${latDeg == 1 ? "" : "s"}`;
+            if (latSec !== null) {
+                latText += `, ${latMin} minute${latMin == 1 ? "" : "s"}, ${latSec} second${latSec == 1 ? "" : "s"} ${latH}`;
+            } else {
+                latText += `, ${latMin} minute${latMin == 1 ? "" : "s"} ${latH}`;
+            }
+
+            let lonText = `${lonDeg} degree${lonDeg == 1 ? "" : "s"}`;
+            if (lonSec !== null) {
+                lonText += `, ${lonMin} minute${lonMin == 1 ? "" : "s"}, ${lonSec} second${lonSec == 1 ? "" : "s"} ${lonH}`;
+            } else {
+                lonText += `, ${lonMin} minute${lonMin == 1 ? "" : "s"} ${lonH}`;
+            }
+
+            return `Airport Reference Point (geometric center of all usable runway surfaces) — Latitude: ${latText}; Longitude: ${lonText}.`;
+        }
+
+        // Match DMS: NDD°MM'SS" , E/WDDD°MM'SS"
+        let m = txt.match(/^([NS])\s*(\d{1,2})°\s*(\d{2})'\s*(\d{2}(?:\.\d+)?)"\s*,\s*([EW])\s*(\d{1,3})°\s*(\d{2})'\s*(\d{2}(?:\.\d+)?)"$/i);
+        if (m) {
+            const [ , latH, latD, latM, latS, lonH, lonD, lonM, lonS ] = m;
+            output = writeLatLon(parseInt(latD), parseFloat(latM), parseFloat(latS), latH.toUpperCase(), parseInt(lonD), parseFloat(lonM), parseFloat(lonS), lonH.toUpperCase());
+        } else {
+            // Match DMM with decimal or whole minutes: NDD°MM.mm' , E/WDDD°MM.mm'
+            m = txt.match(/^([NS])\s*(\d{1,2})°\s*(\d{2}(?:\.\d+)?)'\s*,\s*([EW])\s*(\d{1,3})°\s*(\d{2}(?:\.\d+)?)'$/i)
+            || txt.match(/^([NS])\s*(\d{1,2})°\s*(\d{2})'\s*,\s*([EW])\s*(\d{1,3})°\s*(\d{2})'$/i)
+            || txt.match(/^([NS])\s*(\d{1,2})°\s*(\d{2}(?:\.\d+)?)'\s+\s*([EW])\s*(\d{1,3})°\s*(\d{2}(?:\.\d+)?)'$/i)
+            || txt.match(/^([NS])\s*(\d{1,2})°\s*(\d{2})'\s+\s*([EW])\s*(\d{1,3})°\s*(\d{2})'$/i);
+            if (m) {
+                const [ , latH, latD, latM, lonH, lonD, lonM ] = m;
+                output = writeLatLon(parseInt(latD), parseFloat(latM), null, latH.toUpperCase(), parseInt(lonD), parseFloat(lonM), null, lonH.toUpperCase());
+            }
+        }
+    }
+
+    // Combined multi-phenomena timing like:
+    //  UPB11E12B44E47FZRAB29E44SNE11B12E14
+    else if (/^(?:(?:UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)(?:B\d{2}|E\d{2})+)+$/i.test(input)) {
+    const precipType = {
+        UP: "Unknown Precipitation",
+        FZRA: "Freezing Rain",
+        SN: "Snow",
+        RA: "Rain",
+        DZ: "Drizzle",
+        PL: "Ice Pellets",
+        SG: "Snow Grains",
+        GR: "Hail",
+        IC: "Ice Crystals"
+    };
+
+    // split into chunks by leading type tokens
+    const chunks = input.match(/(?:UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)(?:B\d{2}|E\d{2})+/gi) || [];
+    const pieces = chunks.map(chunk => {
+        const type = chunk.match(/^(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)/i)[0].toUpperCase();
+        const segs = chunk.match(/B\d{2}|E\d{2}/g) || [];
+        let out = `${precipType[type] || type} timing:`;
+        let lastStart = null;
+
+        segs.forEach(seg => {
+        const mm = parseInt(seg.slice(1), 10);
+        if (seg[0] === 'B') {
+            lastStart = mm;
+        } else {
+            // E
+            if (lastStart !== null) {
+            out += ` started at ${String(lastStart).padStart(2,'0')} and ended at ${String(mm).padStart(2,'0')} minutes past the hour.`;
+            lastStart = null;
+            } else {
+            out += ` ended at ${String(mm).padStart(2,'0')} minutes past the hour.`;
+            }
+        }
+        });
+
+        if (lastStart !== null) {
+        out += ` started at ${String(lastStart).padStart(2,'0')} minutes past the hour.`;
+        }
+        return out;
+    });
+
+    output = pieces.join("\n");
+    }
+
+    // Z / ZULU (explicit reference to UTC)
+    else if (/^(Z|ZULU)$/i.test(input)) {
+        output = "Z (Zulu) time equals Coordinated Universal Time (UTC).";
+    }
+
+    // UTC±H with optional daylight block (e.g., "UTC-5(-4DT)")
+    else if (/^UTC\s*[+\-−]\s*\d{1,2}\s*(?:\(\s*[+\-−]\s*\d{1,2}\s*DT\s*\))?(?:\s*‡)?$/i.test(input)) {
+        const m = input.match(/^UTC\s*([+\-−])\s*(\d{1,2})\s*(?:\(\s*([+\-−])\s*(\d{1,2})\s*DT\s*\))?/i);
+        if (m) {
+            const norm = s => (s === "−" ? "-" : s);
+            const stdSign = norm(m[1]);
+            const stdHrs  = parseInt(m[2], 10);
+            const hasDST  = !!m[3];
+            const dstSign = hasDST ? norm(m[3]) : null;
+            const dstHrs  = hasDST ? parseInt(m[4], 10) : null;
+
+            const offsetText = (sign, hrs) => {
+                const rel = sign === "-" ? "behind" : "ahead of";
+                return `${hrs} hour${hrs === 1 ? "" : "s"} ${rel} UTC`;
+            };
+
+            output = hasDST
+            ? `Local standard time is ${offsetText(stdSign, stdHrs)}; during Daylight Saving Time it is ${offsetText(dstSign, dstHrs)}.`
+            : `Local standard time is ${offsetText(stdSign, stdHrs)}. Daylight Saving Time offset is not listed.`;
+
+            // If the user included a ‡ anywhere, append the DST note
+            if (/\u2021/.test(input)) {
+                output += " During Daylight Saving Time, effective hours are one hour earlier than the hours printed.";
+            }
+        }
+    }
+
+    // UTC±H with explicit NO DST (e.g., "UTC-5 NO DST" or "UTC-5 (NO DST)")
+    else if (/^UTC\s*[+\-−]\s*\d{1,2}\s*(?:NO\s*DST|\(NO\s*DST\))$/i.test(input)) {
+        const m = input.match(/^UTC\s*([+\-−])\s*(\d{1,2})/i);
+        const sign = (m[1] === "−") ? "-" : m[1];
+        const hrs  = parseInt(m[2], 10);
+        const rel  = sign === "-" ? "behind" : "ahead of";
+        output = `Local standard time is ${hrs} hour${hrs === 1 ? "" : "s"} ${rel} UTC. Area does not observe Daylight Saving Time.`;
+    }
+
+    // Double-dagger ‡ alone (DST note)
+    else if (/^\u2021$/.test(input.trim())) {
+        output = "During Daylight Saving Time, effective hours are one hour earlier than the hours printed.";
+    }
+
+    // Seasonal Z-time blocks, e.g., "Apr 15–Aug 31 0630–1700Z, Sep 1–Apr 14 0600–1700Z"
+    else if (/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*[\u2012-\u2015-]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{3,4}Z?\s*[\u2012-\u2015-]\s*\d{3,4}Z?(?:\s*,\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s*[\u2012-\u2015-]\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+\d{1,2}\s+\d{3,4}Z?\s*[\u2012-\u2015-]\s*\d{3,4}Z?)$/i.test(input)) {
+        const text = input.replace(/[\u2012-\u2015]/g, "-");
+        const month = m => ({
+            Jan:"January", Feb:"February", Mar:"March", Apr:"April", May:"May", Jun:"June",
+            Jul:"July", Aug:"August", Sep:"September", Oct:"October", Nov:"November", Dec:"December"
+        })[m];
+
+        const parts = text.split(/\s*,\s*/);
+        const parseRange = (str) => {
+            const r = str.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s*-\s*(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s+(\d{1,2})\s+(\d{3,4})Z?\s*-\s*(\d{3,4})Z?$/i);
+            if (!r) return null;
+            const [, m1, d1, m2, d2, t1, t2] = r;
+            const fmt = t => (t.length === 3 ? `0${t}` : t).replace(/^(\d{2})(\d{2})$/, "$1:$2");
+            return `${month(m1)} ${d1} to ${month(m2)} ${d2}: ${fmt(t1)}Z–${fmt(t2)}Z`;
+        };
+
+        const blocks = parts.map(parseRange).filter(Boolean);
+        if (blocks.length) {
+            output = `Seasonal operating hours in Z (UTC): ${blocks.join("; ")}.`;
+        }
+    }
+
+    // Plain "UTC-6" without extras
+    else if (/^UTC\s*[+\-−]\s*\d{1,2}$/.test(input)) {
+        const m = input.match(/^UTC\s*([+\-−])\s*(\d{1,2})$/);
+        const sign = (m[1] === "−") ? "-" : m[1];
+        const hrs  = parseInt(m[2], 10);
+        const rel  = sign === "-" ? "behind" : "ahead of";
+        output = `Local standard time is ${hrs} hour${hrs === 1 ? "" : "s"} ${rel} UTC.`;
+    }
+
+    // TREND Forecasts – BECMG, TEMPO with optional FM, TL, AT times
+    else if (/^(BECMG|TEMPO)(?: FM\d{4})?(?: TL\d{4})?(?: AT\d{4})?$/i.test(input)) {
+        let match = input.match(/^(BECMG|TEMPO)?(?: FM(\d{4}))?(?: TL(\d{4}))?(?: AT(\d{4}))?$/i);
+        if (match) {
+            let trendType = match[1] ? (match[1] === "BECMG" ? "Becoming" : "Temporary change expected") : "";
+            let fromTime = match[2] ? ` from ${match[2].slice(0, 2)}:${match[2].slice(2, 4)} UTC` : "";
+            let untilTime = match[3] ? ` until ${match[3].slice(0, 2)}:${match[3].slice(2, 4)} UTC` : "";
+            let atTime = match[4] ? ` at ${match[4].slice(0, 2)}:${match[4].slice(2, 4)} UTC` : "";
+
+            output = `${trendType}${fromTime}${untilTime}${atTime}.`.trim();
+        }
+    }
+
+    // Isolated Time Indicators – FM1030, TL1130, AT1400
+    else if (/^(FM|TL|AT)\d{4}$/i.test(input)) {
+        let match = input.match(/^(FM|TL|AT)(\d{4})$/i);
+        if (match) {
+            let timeType = match[1] === "FM" ? "From" : match[1] === "TL" ? "Until" : "At";
+            let time = `${match[2].slice(0, 2)}:${match[2].slice(2, 4)} UTC`;
+
+            output = `${timeType} ${time}.`;
+        }
+    }
+
+    // No Significant Change (NOSIG)
+    else if (/^NOSIG$/i.test(input)) {
+        output = "No significant changes expected during the forecast period.";
+    }
+
+    // No Significant Weather (NSW)
+    else if (/^NSW$/i.test(input)) {
+        output = "No significant weather expected.";
+    }
+
+    // Recent Weather – RETS, RERA, RESN, etc.
+    else if (/^RE(RA|SN|TS|DZ|FZRA|FZDZ|PL|GR|GS|SS|DS|FG|BR|HZ|DU|SA|VA)$/.test(input)) {
+        let recentWeatherDescriptions = {
+            "RA": "Rain",
+            "SN": "Snow",
+            "TS": "Thunderstorm",
+            "DZ": "Drizzle",
+            "FZRA": "Freezing Rain",
+            "FZDZ": "Freezing Drizzle",
+            "PL": "Ice Pellets",
+            "GR": "Hail",
+            "GS": "Small Hail/Snow Pellets",
+            "SS": "Sandstorm",
+            "DS": "Dust Storm",
+            "FG": "Fog",
+            "BR": "Mist",
+            "HZ": "Haze",
+            "DU": "Widespread Dust",
+            "SA": "Sand",
+            "VA": "Volcanic Ash"
+        };
+
+        let weatherType = input.slice(2); // Extracts the weather code after 'RE'
+        output = `Recent ${recentWeatherDescriptions[weatherType]}.`;
+    }
+
+    // Runway State Group (RSG) – 8-digit group for runway conditions
+    else if (/^(\d{2}|88|99)(\d|\/)(\d|\/)(\d{2}|\/\/)(\d{2}|\/\/)$/i.test(input)) {
+        let match = input.match(/^(\d{2}|88|99)(\d|\/)(\d|\/)(\d{2}|\/\/)(\d{2}|\/\/)$/i);
+        if (match) {
+            let runwayDesignator = {
+                "88": "All runways",
+                "99": "No new information received"
+            }[match[1]] || `Runway ${match[1]}`;
+
+            let depositTypes = {
+                "0": "Clear and dry",
+                "1": "Damp",
+                "2": "Wet or water patches",
+                "3": "Rime or frost (less than 1mm)",
+                "4": "Dry snow",
+                "5": "Wet snow",
+                "6": "Slush",
+                "7": "Ice",
+                "8": "Compacted or rolled snow",
+                "9": "Frozen ruts or ridges",
+                "/": "Deposit type not reported"
+            };
+            let deposit = depositTypes[match[2]] || "Unknown deposit type";
+
+            let contaminationExtent = {
+                "1": "10% or less",
+                "2": "11% to 25%",
+                "5": "26% to 50%",
+                "9": "51% to 100%",
+                "/": "Contamination extent not reported"
+            }[match[3]] || "Unknown extent";
+
+            let depthOfDeposit;
+            if (match[4] === "//") {
+                depthOfDeposit = "Depth not significant or measurable";
+            } else if (match[4] === "00") {
+                depthOfDeposit = "Less than 1mm";
+            } else if (match[4] === "91") {
+                depthOfDeposit = "Not used";
+            } else if (match[4] === "92") {
+                depthOfDeposit = "10 cm";
+            } else if (match[4] === "93") {
+                depthOfDeposit = "15 cm";
+            } else if (match[4] === "94") {
+                depthOfDeposit = "20 cm";
+            } else if (match[4] === "95") {
+                depthOfDeposit = "25 cm";
+            } else if (match[4] === "96") {
+                depthOfDeposit = "30 cm";
+            } else if (match[4] === "97") {
+                depthOfDeposit = "35 cm";
+            } else if (match[4] === "98") {
+                depthOfDeposit = "40 cm or more";
+            } else if (match[4] === "99") {
+                depthOfDeposit = "Runway non-operational due to snow, slush, ice, or large drifts";
+            } else {
+                depthOfDeposit = `${parseInt(match[4])} mm`;
+            }
+
+            let brakingAction;
+            if (match[5] === "//") {
+                brakingAction = "Braking action not reported";
+            } else if (match[5] === "99") {
+                brakingAction = "Figures unreliable";
+            } else if (match[5] === "91") {
+                brakingAction = "Poor";
+            } else if (match[5] === "92") {
+                brakingAction = "Medium/Poor";
+            } else if (match[5] === "93") {
+                brakingAction = "Medium";
+            } else if (match[5] === "94") {
+                brakingAction = "Medium/Good";
+            } else if (match[5] === "95") {
+                brakingAction = "Good";
+            } else {
+                brakingAction = `Friction coefficient ${parseInt(match[5]) / 100}`;
+            }
+
+            output = `${runwayDesignator}: ${deposit}, Contamination extent: ${contaminationExtent}, Depth: ${depthOfDeposit}, Braking action: ${brakingAction}.`;
+        }
+    }
+
+    // Runway State Group – CLRD (Cleared Runway Condition)
+    else if (/^\d{2}CLRD\d{2}$|^88CLRD\d{2}$/i.test(input)) {
+        let match = input.match(/^(\d{2}|88)CLRD(\d{2})$/i);
+        if (match) {
+            let runway = match[1] === "88" ? "All runways" : `Runway ${match[1]}`;
+            let brakingAction = {
+                "91": "Poor",
+                "92": "Medium/Poor",
+                "93": "Medium",
+                "94": "Medium/Good",
+                "95": "Good"
+            }[match[2]] || "Unknown braking action";
+
+            output = `${runway} cleared; Braking action: ${brakingAction}.`;
+        }
+    }
+
+    // Wind Shear Affecting All Runways – WS ALL RWY
+    else if (/^WS ALL RWY$/i.test(input)) {
+        output = "Wind shear reported for all runways.";
+    }
+
+    // Wind Shear Reports – WS TKOF RWY##, WS ALL RWY, WS RWY##
+    else if (/^WS(?: TKOF)? RWY(?:\d{2}[LCR]?|ALL)$/i.test(input)) {
+        let match = input.match(/^WS(?: TKOF)? RWY(\d{2}[LCR]?|ALL)$/i);
+        if (match) {
+            let phase = input.includes("TKOF") ? "on takeoff " : ""; // Detects "TKOF" (Takeoff) keyword
+            let runway = match[1] === "ALL" ? "all runways" : `Runway ${match[1]}`; // Handles "ALL" or specific RWY
+
+            output = `Wind shear reported ${phase}for ${runway}.`;
+        }
+    }
+
+    // Altimeter Setting (QNH) – Q#### (Pressure in Hectopascals)
+    else if (/^Q\d{4}$/.test(input)) {
+        let pressure = parseInt(input.slice(1), 10); // Extracts the pressure value (e.g., 1013)
+        output = `Altimeter setting: ${pressure} Hectopascals (hPa).`;
+    }
+
+    // Runway Visual Range (RVR) – R##/####, R##L/P####, R##R/M####D
+    else if (/^R\d{2}[LCR]?\/[PM]?\d{4}[UDN]?$/i.test(input)) {
+        let match = input.match(/^R(\d{2})([LCR]?)\/([PM]?)(\d{4})([UDN]?)$/i);
+        if (match) {
+            let runway = `Runway ${match[1]}${match[2] ? match[2] : ""}`; // Extract runway (e.g., R24L → Runway 24L)
+            let rangePrefix = match[3] === "P" ? "more than " :
+                            match[3] === "M" ? "less than " : ""; // P = more than, M = less than
+            let rvrDistance = parseInt(match[4], 10); // Convert RVR distance to integer
+            let trend = match[5] === "U" ? ", increasing" :
+                        match[5] === "D" ? ", decreasing" :
+                        match[5] === "N" ? ", no change" : ""; // Trend indicators
+
+            output = `${runway} RVR is ${rangePrefix}${rvrDistance.toLocaleString()} meters${trend}.`;
+        }
+    }
+
+    // Visibility – Four-digit group (e.g., 0400 = 400m, 8000 = 8km, 9999 = 10km+)
+    else if (/^\d{4}$/.test(input)) {
+        if (input === "9999") {
+            output = "Visibility 10 km or more.";
+        } else if (input === "0000") {
+            output = "Visibility less than 50 meters.";
+        } else {
+            let visibility = parseInt(input, 10);
+            output = `Visibility ${visibility < 5000 ? visibility + " meters" : (visibility / 1000).toFixed(1) + " km"}.`;
+        }
+    }
+
+    // Non-Convective Low-Level Wind Shear (LLWS) – WS###/dddffKT
+    else if (/^WS\d{2,3}\/\d{3}\d{2}KT$/.test(input)) {
+        let match = input.match(/^WS(\d{2,3})\/(\d{3})(\d{2})KT$/);
+        if (match) {
+            let shearHeight = parseInt(match[1]) * 100; // Convert height (e.g., 020 → 2,000 ft, 100 → 10,000 ft)
+            let windDirection = match[2];
+            let windSpeed = match[3];
+
+            output = `Wind shear at ${shearHeight.toLocaleString()} ft, wind from ${windDirection}° true at ${windSpeed} kt.`;
+        }
+    }
+
+    // Cloud and Vertical Obscuration Groups – (NsNsNshshshs or VVhshshs or SKC)
+    else if (/^(VV\d{3}|SKC|BKN\d{3}|FEW\d{3}|OVC\d{3})$/.test(input)) {
+        let cloudTypes = {
+            "SKC": "Sky Clear",
+            "VV": "Vertical Visibility",
+            "BKN": "Broken Clouds",
+            "FEW": "Few Clouds",
+            "OVC": "Overcast Clouds"
+        };
+
+        let type = input.slice(0, 3);  // Extracts the cloud type (e.g., BKN, VV)
+        let altitude = input.length > 3 ? parseInt(input.slice(3)) * 100 : ""; // Extracts altitude and multiplies by 100
+
+        if (cloudTypes[type] && !isNaN(altitude)) {
+            output = `${cloudTypes[type]} at ${altitude} feet`;
+        } else if (cloudTypes[type]) {
+            output = cloudTypes[type]; // If there's no valid altitude, just output the cloud type
+        } else {
+            output = "Unknown Cloud Group";
+        }
+    }
+
+    // Drifting Weather Phenomena – Can Appear with Visibility ≥ 7SM (DRDU, DRSA, DRSN)
+    else if (/^DR(DU|SA|SN)$/.test(input)) {
+        let driftDescriptions = {
+            "DRDU": "Drifting Dust",
+            "DRSA": "Drifting Sand",
+            "DRSN": "Drifting Snow"
+        };
+        output = `Drifting Weather: ${driftDescriptions[input]}`;
+    }
+
+    // Blowing Weather Phenomena – Visibility Restrictions Apply (BLDU, BLSA, BLSN)
+    else if (/^BL(DU|SA|SN)$/.test(input)) {
+        let blowingDescriptions = {
+            "BLDU": "Blowing Dust",
+            "BLSA": "Blowing Sand",
+            "BLSN": "Blowing Snow"
+        };
+        output = `Blowing Weather: ${blowingDescriptions[input]}`;
+    }
+
+    // Shallow, Partial, or Patchy Fog – Can Appear with Visibility ≥ 7SM (MIFG, PRFG, BCFG)
+    else if (/^(MIFG|PRFG|BCFG)$/.test(input)) {
+        let fogDescriptions = {
+            "MIFG": "Shallow Fog",
+            "PRFG": "Partial Fog",
+            "BCFG": "Patchy Fog"
+        };
+        output = `Fog Condition: ${fogDescriptions[input]}`;
+    }
+
+    // Showers (SH) and Thunderstorms (TS) – Can Be Combined with Precipitation
+    else if (/^(SH|TS)(RA|SN|DZ|PL|GR|GS)?$/.test(input)) {
+        let weatherType = input.slice(2);
+        let weatherDescriptions = {
+            "RA": "Rain Showers",
+            "SN": "Snow Showers",
+            "DZ": "Drizzle Showers",
+            "PL": "Ice Pellet Showers",
+            "GR": "Hail Showers",
+            "GS": "Small Hail Showers"
+        };
+        let event = weatherType ? ` with ${weatherDescriptions[weatherType]}` : "";
+        output = `Showers (SH) or Thunderstorm (TS)${event}`;
+    }
+
+    // Freezing Conditions – Freezing Precipitation (FZRA, FZDZ) or Freezing Fog (FZFG)
+    else if (/^FZ(RA|DZ|FG)$/.test(input)) {
+        let freezingDescriptions = {
+            "FZRA": "Freezing Rain",
+            "FZDZ": "Freezing Drizzle",
+            "FZFG": "Freezing Fog"
+        };
+        output = `Freezing Conditions: ${freezingDescriptions[input]}`;
+    }
+
+    // Wind: dddffKT, dddffGggKT, VRBffKT, or 00000KT
+    else if (/^\d{3}\d{2}(G\d{2})?KT$/.test(input)) {
+        let windDir = input.slice(0, 3);
+        let windSpeed = parseInt(input.slice(3, 5));
+        let gustMatch = input.match(/G(\d{2})/);
+        let gustSpeed = gustMatch ? gustMatch[1] : null;
+        output = `Wind: ${windDir}° at ${windSpeed} knots`;
+        if (gustSpeed) output += `, gusting to ${gustSpeed} knots`;
+    } 
+    else if (/^VRB\d{2}KT$/.test(input)) {
+        let windSpeed = parseInt(input.slice(3, 5));
+        output = `Wind: Variable at ${windSpeed} knots`;
+    } 
+    else if (/^00000KT$/.test(input)) {
+        output = "Wind: Calm";
+    }
+
+    // Weather Radar Information Missing (WR//)
+    else if (input === "WR//") {
+        output = "Weather Radar information is unavailable.";
+    }
+
+    // Runway Visual Range with Variability (e.g., R14R/1800VP6000FT)
+    else if (/^R\d{2}[LCR]?\/\d{4}V[P]?\d{4}FT$/.test(input)) {
+        let match = input.match(/^R(\d{2}[LCR]?)\/(\d{4})V(P?\d{4})FT$/);
+        let runway = match[1];
+        let lowRange = parseInt(match[2]);
+        let highRange = match[3].startsWith("P") ? `greater than ${match[3].slice(1)}` : parseInt(match[3]);
+
+        output = `Runway ${runway} visual range varies between ${lowRange} and ${highRange} feet`;
+    }
+
+    // Thunderstorm Begin Time (e.g., TSB1926)
+    else if (/^TSB\d{4}$/.test(input)) {
+        let match = input.match(/^TSB(\d{4})$/);
+        let hours = match[1].slice(0, 2);
+        let minutes = match[1].slice(2, 4);
+        output = `Thunderstorm began at ${hours}:${minutes} UTC`;
+    }
+
+    // Wind/Cloud/Visibility Variability in Direction (e.g., NE-E, S-SW)
+    else if (/^(N|NE|E|SE|S|SW|W|NW)-(N|NE|E|SE|S|SW|W|NW)$/.test(input)) {
+        let match = input.match(/^(N|NE|E|SE|S|SW|W|NW)-(N|NE|E|SE|S|SW|W|NW)$/);
+        let fromDir = match[1];
+        let toDir = match[2];
+        output = `Conditions vary from ${fromDir} to ${toDir}`;
+    }
+
+    // Wind Shift Time (e.g., WSHFT 1901)
+    else if (/^WSHFT \d{4}$/.test(input)) {
+        let time = input.match(/^WSHFT (\d{4})$/)[1];
+        let hours = time.slice(0, 2);
+        let minutes = time.slice(2, 4);
+        output = `Wind shift occurred at ${hours}:${minutes} UTC`;
+    }
+
+    // Temperature and Dew Point
+    else if (/^(M?\d{2})\/(M?\d{2})$/.test(input)) {
+        let matches = input.match(/^(M?\d{2})\/(M?\d{2})$/);
+        let temp = matches[1].replace("M", "-");
+        let dewPoint = matches[2].replace("M", "-");
+        output = `Temperature: ${temp}°C, Dew Point: ${dewPoint}°C`;
+    }
+
+    // Cloud Type & Coverage Breakdown (e.g., SF3NS5)
+    else if (/^((SF|NS|CU|SC|AC|CB|TCU|ST|CI|CS|CC)\d+)+$/.test(input)) {
+        let matches = input.match(/(SF|NS|CU|SC|AC|CB|TCU|ST|CI|CS|CC)(\d+)/g);
+        let decodedClouds = matches.map(m => {
+            let type = m.slice(0, 2);
+            let coverage = m.slice(2);
+            const cloudTypes = {
+                "SF": "Stratus Fractus",
+                "NS": "Nimbostratus",
+                "CU": "Cumulus",
+                "SC": "Stratocumulus",
+                "AC": "Altocumulus",
+                "CB": "Cumulonimbus",
+                "TCU": "Towering Cumulus",
+                "ST": "Stratus",
+                "CI": "Cirrus",
+                "CS": "Cirrostratus",
+                "CC": "Cirrocumulus"
+            };
+            return `${cloudTypes[type] || "Unknown Cloud Type"} (${coverage}/8 coverage)`;
+        }).join(", ");
+        output = `Cloud layers: ${decodedClouds}`;
+    }
+
+    // Sea-Level Pressure with "=" Ending (e.g., SLP832=)
+    else if (/^SLP\d{3}=?$/.test(input)) {
+        let slp = parseInt(input.slice(3, 6));
+        let pressure = slp < 500 ? 1000 + slp / 10 : 900 + slp / 10;
+        output = `Sea-Level Pressure: ${pressure.toFixed(1)} hPa`;
+    }
+
+    // Dynamic Multi-Phenomena "BxxEyy" Decoder (e.g., UPB11E12B44E47FZRAB29E44SNE11B12E14)
+    else if (/^((UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)(B\d{2}E\d{2})+)+$/.test(input)) {
+        let match = input.match(/(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)(B\d{2}|E\d{2})+/g);
+        
+        const precipType = {
+            "UP": "Unknown Precipitation",
+            "FZRA": "Freezing Rain",
+            "SN": "Snow",
+            "RA": "Rain",
+            "DZ": "Drizzle",
+            "PL": "Ice Pellets",
+            "SG": "Snow Grains",
+            "GR": "Hail",
+            "IC": "Ice Crystals"
+        };
+
+        let decoded = [];
+
+        match.forEach(event => {
+            let type = event.match(/^(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)/)[0]; // Extract weather type
+            let times = event.match(/B\d{2}|E\d{2}/g); // Extract time segments
+
+            let eventDescription = `${precipType[type] || "Unknown"} timing:`;
+            let events = [];
+            let lastEvent = null;
+
+            times.forEach(segment => {
+                let time = parseInt(segment.slice(1)); // Extract minutes
+                if (segment.startsWith("B")) {
+                    lastEvent = ` Started at ${time} minutes past the hour`;
+                } else if (segment.startsWith("E")) {
+                    if (lastEvent) {
+                        events.push(lastEvent + ` and ended at ${time} minutes past the hour.`);
+                        lastEvent = null;
+                    } else {
+                        events.push(` Ended at ${time} minutes past the hour.`);
+                    }
+                }
+            });
+
+            decoded.push(eventDescription + events.join(""));
+        });
+
+        output = decoded.join("\n");
+    }
+
+    // Thunderstorm Location & Movement (e.g., TS SE MOV NE)
+    else if (/^TS (N|NE|E|SE|S|SW|W|NW)( MOV (N|NE|E|SE|S|SW|W|NW))?$/.test(input)) {
+        let match = input.match(/^TS (N|NE|E|SE|S|SW|W|NW)( MOV (N|NE|E|SE|S|SW|W|NW))?$/);
+        let location = match[1];
+        let movement = match[3] ? `, moving toward ${match[3]}` : "";
+        output = `Thunderstorm detected ${location}${movement}`;
+    }
+
+    // Cloud Type Breakdown (e.g., CU1SC2SC2AC4, CU2AC3AC2)
+    else if (/^(CU|SC|AC|CB|TCU|ST|NS|CI|CS|CC)\d+(.*)$/.test(input)) {
+        let matches = input.match(/(CU|SC|AC|CB|TCU|ST|NS|CI|CS|CC)(\d+)/g);
+        let decodedClouds = matches.map(m => {
+            let type = m.slice(0, 2);
+            let coverage = m.slice(2);
+            const cloudTypes = {
+                "CU": "Cumulus",
+                "SC": "Stratocumulus",
+                "AC": "Altocumulus",
+                "CB": "Cumulonimbus",
+                "TCU": "Towering Cumulus",
+                "ST": "Stratus",
+                "NS": "Nimbostratus",
+                "CI": "Cirrus",
+                "CS": "Cirrostratus",
+                "CC": "Cirrocumulus"
+            };
+            return `${cloudTypes[type] || "Unknown Cloud Type"} (${coverage}/8 coverage)`;
+        }).join(", ");
+        output = `Cloud layers: ${decodedClouds}`;
+    }
+
+    // Cloud Type Modifiers (e.g., CU TR)
+    else if (/^(CU|SC|AC|CB|TCU|ST|NS|CI|CS|CC) TR$/.test(input)) {
+        const cloudTypes = {
+            "CU": "Cumulus",
+            "SC": "Stratocumulus",
+            "AC": "Altocumulus",
+            "CB": "Cumulonimbus",
+            "TCU": "Towering Cumulus",
+            "ST": "Stratus",
+            "NS": "Nimbostratus",
+            "CI": "Cirrus",
+            "CS": "Cirrostratus",
+            "CC": "Cirrocumulus"
+        };
+        let type = input.split(" ")[0];
+        output = `${cloudTypes[type] || "Unknown Cloud Type"} (transparent or weak development)`;
+    }
+
+    // Density Altitude (e.g., DENSITY ALT 400FT)
+    else if (/^DENSITY ALT \d+FT$/.test(input)) {
+        let altitude = input.match(/\d+/)[0];
+        output = `Density Altitude: ${altitude} feet (altitude adjusted for non-standard temperature/pressure)`;
+    }
+
+    // Multiple Begin (Bxx) and End (Exx) Times (e.g., UPB11E12B44E47, SNE11B12E14)
+    else if (/^(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)(B\d{2}E\d{2})+(B\d{2}E\d{2})+$/.test(input)) {
+        let match = input.match(/(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)|B\d{2}E\d{2}/g);
+        let type = match.shift(); // Extract precipitation type
+
+        const precipType = {
+            "UP": "Unknown Precipitation",
+            "FZRA": "Freezing Rain",
+            "SN": "Snow",
+            "RA": "Rain",
+            "DZ": "Drizzle",
+            "PL": "Ice Pellets",
+            "SG": "Snow Grains",
+            "GR": "Hail",
+            "IC": "Ice Crystals"
+        };
+
+        let decoded = `${precipType[type] || "Unknown"} occurred:`;
+        
+        match.forEach(segment => {
+            let [_, start, end] = segment.match(/B(\d{2})E(\d{2})/);
+            decoded += ` Started at ${start} minutes past the hour and ended at ${end} minutes past the hour.`;
+        });
+
+        output = decoded;
+    }
+
+    // Special case: When the report **starts with "E" (End)**
+    else if (/^(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)E\d{2}B\d{2}E\d{2}$/.test(input)) {
+        let match = input.match(/(UP|FZRA|SN|RA|DZ|PL|SG|GR|IC)|E\d{2}|B\d{2}/g);
+        let type = match.shift(); // Extract precipitation type
+
+        const precipType = {
+            "UP": "Unknown Precipitation",
+            "FZRA": "Freezing Rain",
+            "SN": "Snow",
+            "RA": "Rain",
+            "DZ": "Drizzle",
+            "PL": "Ice Pellets",
+            "SG": "Snow Grains",
+            "GR": "Hail",
+            "IC": "Ice Crystals"
+        };
+
+        let decoded = `${precipType[type] || "Unknown"} timing:`;
+        
+        let events = [];
+        let lastEvent = null;
+        
+        match.forEach(segment => {
+            let time = parseInt(segment.slice(1)); // Extract minutes
+            if (segment.startsWith("E")) {
+                events.push(` Ended at ${time} minutes past the hour.`);
+            } else if (segment.startsWith("B")) {
+                lastEvent = ` Started at ${time} minutes past the hour`;
+            }
+        });
+
+        output = decoded + events.join("") + (lastEvent ? lastEvent + "." : "");
+    }
+
+    // Hailstone Size (e.g., GR 1 3/4)
+    else if (/^GR (\d+ \d?\/?\d?)$/.test(input)) {
+        let match = input.match(/^GR (\d+ \d?\/?\d?)$/);
+        output = `Hailstone size: ${match[1]} inches`;
+    }
+
+    // Wind with gusts and variable direction (e.g., 21016G24KT 180V240)
+    else if (/^(\d{3})(\d{2,3})(G\d{2,3})?KT (\d{3})V(\d{3})$/.test(input)) {
+        let match = input.match(/^(\d{3})(\d{2,3})(G\d{2,3})?KT (\d{3})V(\d{3})$/);
+        let windDir = match[1]; // Wind direction
+        let windSpeed = parseInt(match[2]); // Base wind speed
+        let gustSpeed = match[3] ? parseInt(match[3].slice(1)) : null; // Extract gust speed if present
+        let varLow = match[4]; // Lower bound of variable wind direction
+        let varHigh = match[5]; // Upper bound of variable wind direction
+
+        output = `Wind from ${windDir}° at ${windSpeed} knots`;
+        if (gustSpeed) output += `, gusting to ${gustSpeed} knots`;
+        output += `, varying between ${varLow}° and ${varHigh}°`;
+    }
+
+
+    // Virga (e.g., VIRGA SW)
+    else if (/^VIRGA( (N|NE|E|SE|S|SW|W|NW))?$/.test(input)) {
+        let match = input.match(/^VIRGA( (N|NE|E|SE|S|SW|W|NW))?$/);
+        let direction = match[1] ? ` in the ${match[1].trim()} direction` : "";
+        output = `Virga observed${direction}`;
+    }
+
+    // Variable Ceiling Height (e.g., CIG 005V010)
+    else if (/^CIG (\d{3})V(\d{3})$/.test(input)) {
+        let match = input.match(/^CIG (\d{3})V(\d{3})$/);
+        let low = parseInt(match[1]) * 100;
+        let high = parseInt(match[2]) * 100;
+        output = `Ceiling height variable between ${low} and ${high} feet`;
+    }
+
+    // Obscurations (e.g., FG SCT000, FU BKN020)
+    else if (/^(FG|FU|HZ|BR) (FEW|SCT|BKN|OVC)(\d{3})$/.test(input)) {
+        let match = input.match(/^(FG|FU|HZ|BR) (FEW|SCT|BKN|OVC)(\d{3})$/);
+        let obscuration = match[1];
+        let skyCover = match[2];
+        let height = match[3] === "000" ? "surface" : `${parseInt(match[3]) * 100} feet`;
+        output = `${obscuration} causing ${skyCover} at ${height}`;
+    }
+
+    // Variable Sky Condition (e.g., BKN014 V OVC)
+    else if (/^(FEW|SCT|BKN|OVC)\d{3} V (FEW|SCT|BKN|OVC)$/.test(input)) {
+        let match = input.match(/^(FEW|SCT|BKN|OVC)(\d{3}) V (FEW|SCT|BKN|OVC)$/);
+        let height = parseInt(match[2]) * 100;
+        output = `Cloud cover varies between ${match[1]} and ${match[3]} at ${height} feet`;
+    }
+
+    // Cumulonimbus & Movement (e.g., CB W MOV E, CB DSNT W)
+    else if (/^CB (DSNT )?(N|NE|E|SE|S|SW|W|NW)( MOV (N|NE|E|SE|S|SW|W|NW))?$/.test(input)) {
+        let match = input.match(/^CB (DSNT )?(N|NE|E|SE|S|SW|W|NW)( MOV (N|NE|E|SE|S|SW|W|NW))?$/);
+        let distance = match[1] ? "Distant " : "";
+        let location = match[2];
+        let movement = match[4] ? `, moving toward ${match[4]}` : "";
+        output = `${distance}Cumulonimbus detected ${location}${movement}`;
+    }
+
+    // Towering Cumulus (e.g., TCU W)
+    else if (/^TCU (N|NE|E|SE|S|SW|W|NW)$/.test(input)) {
+        let match = input.match(/^TCU (N|NE|E|SE|S|SW|W|NW)$/);
+        output = `Towering Cumulus detected in the ${match[1]} direction`;
+    }
+
+    // Standing Lenticular/Rotor Clouds (e.g., ACSL SW-W, APRNT ROTOR CLD NE)
+    else if (/^(ACSL|SCSL|CCSL|APPRNT ROTOR CLD) (.+)$/.test(input)) {
+        let match = input.match(/^(ACSL|SCSL|CCSL|APPRNT ROTOR CLD) (.+)$/);
+        output = `${match[1]} observed ${match[2]}`;
+    }
+
+    // Ceiling Height at Second Location (e.g., CIG 002 RWY11)
+    else if (/^CIG (\d{3}) RWY\d{2}[LCR]?/.test(input)) {
+        let match = input.match(/^CIG (\d{3}) RWY(\d{2}[LCR]?)$/);
+        let height = parseInt(match[1]) * 100;
+        output = `Ceiling height at Runway ${match[2]}: ${height} feet`;
+    }
+
+    // Pressure Rising/Falling Rapidly (e.g., PRESRR, PRESFR)
+    else if (/^PRES(RR|FR)$/.test(input)) {
+        output = input === "PRESRR" ? "Pressure rising rapidly" : "Pressure falling rapidly";
+    }
+
+    // Sea-Level Pressure (e.g., SLP982)
+    else if (/^SLP\d{3}$/.test(input)) {
+        let pressure = parseInt(input.slice(3));
+        let inferredPressure = pressure < 500 ? 1000 + pressure / 10 : 900 + pressure / 10;
+        output = `Sea-Level Pressure: ${inferredPressure.toFixed(1)} hPa`;
+    }
+
+    // Aircraft Mishap Report (e.g., ACFT MSHP)
+    else if (/^ACFT MSHP$/.test(input)) {
+        output = "Aircraft mishap reported";
+    }
+
+    // No SPECI Reports Taken (e.g., NOSPECI)
+    else if (/^NOSPECI$/.test(input)) {
+        output = "No SPECI reports taken at this station";
+    }
+
+    // Snow Increasing Rapidly (e.g., SNINCR 2/10)
+    else if (/^SNINCR \d+\/\d+$/.test(input)) {
+        let match = input.match(/^SNINCR (\d+)\/(\d+)$/);
+        output = `Snow increased by ${match[1]} inches in the last hour, total depth is ${match[2]} inches`;
+    }
+
+
+    // Hourly Precipitation Amount (e.g., P0023 means 0.23 inches)
+    else if (/^P\d{4}$/.test(input)) {
+        let precipitation = (parseInt(input.slice(1, 5)) / 100).toFixed(2);
+        output = `Hourly Precipitation: ${precipitation} inches`;
+    }
+
+    // Exact Temperature and Dew Point (e.g., T00061011)
+    else if (/^T[01]\d{3}[01]\d{3}$/.test(input)) {
+        let signTemp = input[1] === "0" ? "+" : "-";
+        let temp = (parseInt(input.slice(2, 5)) / 10).toFixed(1);
+
+        let signDew = input[5] === "0" ? "+" : "-";
+        let dewPoint = (parseInt(input.slice(6, 9)) / 10).toFixed(1);
+
+        output = `Exact Temp: ${signTemp}${temp}°C, Exact Dew Point: ${signDew}${dewPoint}°C`;
+    }
+
+    // Precipitation or Thunderstorm Timing (e.g., RAB05E30, SHRAB05E30SHSNB20E55, TSB0159E30)
+    else if (/^([A-Z]{2,4}B\d{2,4}E\d{2,4})+$/i.test(input)) {
+        const weatherCodes = {
+            "RA": "Rain",
+            "SN": "Snow",
+            "SHRA": "Showers with Rain",
+            "SHSN": "Showers with Snow",
+            "TS": "Thunderstorm"
+        };
+
+        let matches = input.match(/([A-Z]{2,4})B(\d{2,4})E(\d{2,4})/g);
+        let descriptions = [];
+
+        matches.forEach(match => {
+            let parts = match.match(/([A-Z]{2,4})B(\d{2,4})E(\d{2,4})/);
+            let event = weatherCodes[parts[1]] || parts[1]; // If unknown, keep original code
+            let beginTime = parts[2].length === 2 ? `${parts[2]} minutes past the hour` : `${parts[2].slice(0,2)}:${parts[2].slice(2)} UTC`;
+            let endTime = parts[3].length === 2 ? `${parts[3]} minutes past the hour` : `${parts[3].slice(0,2)}:${parts[3].slice(2)} UTC`;
+
+            descriptions.push(`${event} began at ${beginTime}, ended at ${endTime}`);
+        });
+
+        output = descriptions.join("; ");
+    }
+
+    // Variable Ceiling Heights (e.g., CIG 007V014)
+    else if (/^\d{3}V\d{3}$/.test(input)) {
+        let ceilingLow = parseInt(input.slice(0, 3)) * 100; // Convert to feet
+        let ceilingHigh = parseInt(input.slice(4, 7)) * 100; // Convert to feet
+        output = `Ceiling varies between ${ceilingLow} and ${ceilingHigh} feet`;
+    }
+
+    // CAVOK (Ceiling and Visibility OK)
+    else if (input === "CAVOK") {
+        output = "Ceiling and Visibility OK (10+ km visibility, no significant clouds below 5000 ft, no weather obstructions)";
+    }
+
+    // Cloud Heights: VV, FEW, SCT, BKN, OVC
+    else if (/^(VV|FEW|SCT|BKN|OVC)\d{3}$/.test(input)) {
+        let type = input.slice(0, 2);
+        let height = parseInt(input.slice(2)) * 100;
+        const cloudDescriptions = {
+            "VV": "Vertical visibility",
+            "FEW": "Few clouds",
+            "SCT": "Scattered clouds",
+            "BKN": "Broken clouds",
+            "OVC": "Overcast"
+        };
+        output = `${cloudDescriptions[type]} at ${height} feet`;
+    } 
+
+    // Sky Clear Conditions
+    else if (/^SKC|CLR$/.test(input)) {
+        output = "Sky clear";
+    }
+
+    // Vertical Visibility Missing Data (VV///)
+    else if (input === "VV///") {
+        output = "Vertical visibility unavailable (missing data)";
+    }
+ 
+    else if (/^SKC|CLR$/.test(input)) {
+        output = "Sky clear";
+    }
+
+    // Runway Visual Range (RVR)
+    else if (/^R\d{2}[LCR]?\/[MP]?\d{4}FT$/.test(input)) {
+        let runwayMatch = input.match(/R(\d{2}[LCR]?)/);
+        let rangeMatch = input.match(/\/([MP]?\d{4})FT/);
+
+        if (runwayMatch && rangeMatch) {
+            let runway = runwayMatch[1];
+            let range = rangeMatch[1];
+            let condition = range.startsWith("M") ? "less than " : range.startsWith("P") ? "greater than " : "";
+            output = `Runway ${runway} visibility: ${condition}${range.replace(/[MP]/, "")} feet`;
+        }
+    }
+
+    // Cloud Cover with Cloud Type (e.g., OVC010CB, BKN015TCU)
+    else if (/^(FEW|SCT|BKN|OVC)\d{3}(CB|TCU)?$/.test(input)) {
+        const cloudTypes = {
+            "FEW": "Few clouds",
+            "SCT": "Scattered clouds",
+            "BKN": "Broken clouds",
+            "OVC": "Overcast"
+        };
+
+        const cloudSpecialTypes = {
+            "CB": "Cumulonimbus",
+            "TCU": "Towering Cumulus"
+        };
+
+        let match = input.match(/^(FEW|SCT|BKN|OVC)(\d{3})(CB|TCU)?$/);
+        let cloudCover = cloudTypes[match[1]];
+        let altitude = parseInt(match[2]) * 100; // Convert to feet
+        let specialCloud = match[3] ? ` with ${cloudSpecialTypes[match[3]]}` : "";
+
+        output = `${cloudCover} at ${altitude} feet${specialCloud}`;
+    }
+
+
+    // ICAO Airport Code (Only U.S. airports starting with 'K', e.g., KATL, KLAX, KJFK)
+    else if (/^K[A-Z]{3}$/.test(input)) {
+        output = `ICAO Airport Code: ${input}`;
+    }
+
+    // Runway-Specific Visibility (e.g., VIS 2 1/2 RWY11, VIS 1/2 RWY22L)
+    else if (/^VIS (\d+\s?\d?\/?\d?) RWY(\d{2}[LCR]?)$/.test(input)) {
+        let match = input.match(/^VIS (\d+\s?\d?\/?\d?) RWY(\d{2}[LCR]?)$/);
+        let visibility = match[1];
+        let runway = match[2];
+
+        output = `Visibility on Runway ${runway}: ${visibility} statute miles`;
+    }
+
+
+    // Sector Visibility (e.g., VIS NE 2 1/2, VIS SW 1/2, VIS E 3)
+    else if (/^VIS (N|NE|E|SE|S|SW|W|NW) (\d+\s?\d?\/?\d?)$/.test(input)) {
+        let match = input.match(/^VIS (N|NE|E|SE|S|SW|W|NW) (\d+\s?\d?\/?\d?)$/);
+        let direction = match[1];
+        let visibility = match[2];
+
+        output = `Visibility in the ${direction} direction: ${visibility} statute miles`;
+    }
+
+    // Lightning Types (e.g., LTGIC, LTGCC, LTGCG, LTGCA, LTGCCCGIC)
+    else if (/^LTG(CC|CG|IC|CA|CCCGIC)+$/.test(input)) {
+        let matches = input.match(/(CC|CG|IC|CA|CCCGIC)/g);
+        const lightningTypes = {
+            "IC": "In-cloud lightning",
+            "CC": "Cloud-to-cloud lightning",
+            "CG": "Cloud-to-ground lightning",
+            "CA": "Cloud-to-air lightning",
+            "CCCGIC": "Mixed cloud-to-cloud, cloud-to-ground, and in-cloud lightning"
+        };
+
+        let descriptions = matches.map(type => lightningTypes[type] || "Unknown Lightning Type");
+        output = `Lightning detected: ${descriptions.join(", ")}`;
+    }
+
+    // Lightning Activity (e.g., LTGICCG, LTG DSNT, LTG OHD, LTGCC, LTGFRQCG)
+    else if (/^LTG([A-Z]{2,4})?( DSNT| OHD)?$/.test(input)) {
+        const lightningTypes = {
+            "IC": "In-Cloud Lightning",
+            "CC": "Cloud-to-Cloud Lightning",
+            "CG": "Cloud-to-Ground Lightning",
+            "CA": "Cloud-to-Air Lightning"
+        };
+
+        const lightningFrequency = {
+            "OCNL": "Occasional (less than 1 flash per minute)",
+            "FRQ": "Frequent (1 to 6 flashes per minute)",
+            "CONS": "Continuous (more than 6 flashes per minute)"
+        };
+
+        let match = input.match(/^LTG([A-Z]{2,4})?( DSNT| OHD)?$/);
+        let lightningEvents = match[1] || "";
+        let location = match[2] ? match[2].trim() : "";
+
+        let descriptions = [];
+
+        // Split multi-part lightning codes (e.g., IC+CC+CG+FRQ)
+        for (let type in lightningTypes) {
+            if (lightningEvents.includes(type)) {
+                descriptions.push(lightningTypes[type]);
+            }
+        }
+
+        // Detect frequency if present
+        for (let freq in lightningFrequency) {
+            if (lightningEvents.includes(freq)) {
+                descriptions.push(lightningFrequency[freq]);
+                lightningEvents = lightningEvents.replace(freq, ""); // Remove frequency to avoid duplicates
+            }
+        }
+
+        // Format the output
+        let lightningDescription = descriptions.length > 0 ? descriptions.join(" and ") : "Lightning";
+        let locationDescription = location === "DSNT" ? "in the distance" : location === "OHD" ? "overhead" : "";
+
+        output = `${lightningDescription}${locationDescription ? ` ${locationDescription}` : ""}`;
+    }
+
+
+    // Variable Visibility (e.g., VIS 1/2V2, VIS 3/4V5)
+    else if (/^VIS (\d+\s?\d?\/?\d?)V(\d+\s?\d?\/?\d?)$/.test(input)) {
+        let match = input.match(/^VIS (\d+\s?\d?\/?\d?)V(\d+\s?\d?\/?\d?)$/);
+        let visMin = match[1];
+        let visMax = match[2];
+
+        output = `Visibility varies between ${visMin} and ${visMax} statute miles`;
+    }
+
+
+    // Tower Visibility (e.g., TWR VIS 1, TWR VIS 1 1/2, TWR VIS 2 3/4)
+    else if (/^TWR VIS (\d+\s?\d?\/?\d?)$/.test(input)) {
+        let match = input.match(/^TWR VIS (\d+\s?\d?\/?\d?)$/);
+        let visibility = match[1];
+
+        output = `Tower Visibility: ${visibility} statute miles`;
+    }
+
+
+    // Wind Shift (e.g., WSHFT 30, WSHFT 45 FROPA)
+    else if (/^WSHFT \d{2}( FROPA)?$/.test(input)) {
+        let match = input.match(/^WSHFT (\d{2})( FROPA)?$/);
+        let time = match[1];
+        let frontalPassage = match[2] ? " due to Frontal Passage" : "";
+
+        output = `Wind Shift at ${time} minutes past the hour${frontalPassage}`;
+    }
+
+
+    // Peak Wind (e.g., PK WND 23045/15)
+    else if (/^PK WND \d{3}\d{2}\/\d{2}$/.test(input)) {
+        let match = input.match(/^PK WND (\d{3})(\d{2})\/(\d{2})$/);
+        let windDirection = match[1];
+        let windSpeed = match[2];
+        let time = match[3];
+
+        output = `Peak Wind: ${windDirection}° at ${windSpeed} knots, recorded at ${time} minutes past the hour`;
+    }
+
+    // Generic Wind Report (e.g., 31037/0438)
+    else if (/^\d{5}\/\d{4}$/.test(input)) {
+        let match = input.match(/^(\d{3})(\d{2})\/(\d{4})$/);
+        let direction = match[1]; // Wind direction in degrees
+        let speed = match[2]; // Wind speed in knots
+        let time = match[3].slice(0, 2) + ":" + match[3].slice(2); // Convert to HH:MM UTC format
+
+        output = `Wind Report: Wind from ${direction}° at ${speed} knots, recorded at ${time} UTC.`;
+    }
+
+    // Observation Time (e.g., 210553Z)
+    else if (/^\d{2}\d{4}Z$/.test(input)) {
+        let day = input.slice(0, 2);
+        let hour = input.slice(2, 4);
+        let minute = input.slice(4, 6);
+        output = `Observation Time: ${day}th at ${hour}:${minute} UTC`;
+    }
+
+    // Altimeter Setting
+    else if (/^A\d{4}$/.test(input)) {
+        let pressure = (parseInt(input.slice(1, 5)) / 100).toFixed(2);
+        output = `Altimeter Setting: ${pressure} inHg`;
+    }
+
+    // Sea-Level Pressure (SLPXXX)
+    else if (/^SLP\d{3}$/.test(input)) {
+        let slp = parseInt(input.slice(3));
+        let pressure = slp < 500 ? 1000 + slp / 10 : 900 + slp / 10;
+        output = `Sea-Level Pressure: ${pressure.toFixed(1)} hPa`;
+    }
+
+    // Sensor Status Indicators (e.g., RVRNO, PWINO, TSNO, CHINO LOC)
+    else if (/^(RVRNO|PWINO|PNO|FZRANO|TSNO|VISNO LOC|CHINO LOC)$/.test(input)) {
+        const sensorStatus = {
+            "RVRNO": "Runway Visual Range (RVR) is not operating",
+            "PWINO": "Present weather sensor is not operating",
+            "PNO": "Tipping bucket rain gauge is not operating",
+            "FZRANO": "Freezing rain sensor is not operating",
+            "TSNO": "Lightning detection system is not operating",
+            "VISNO LOC": "Secondary visibility sensor is not operating at a specified location",
+            "CHINO LOC": "Secondary ceiling height indicator is not operating at a specified location"
+        };
+
+        output = sensorStatus[input] || "Unknown sensor status issue";
+    }
+
+    // "NO" endings (e.g., TSNO, RVRNO, CHINO)
+    else if (input.endsWith("NO")) {
+        output = `Report: ${input} - Information Not Available`;
+    }
+
+    // Visibility (Kilometers)
+    else if (/^\d{4}$/.test(input)) {
+        output = `Visibility: ${parseFloat(input) / 1000} km`;
+    }
+
+    // Peak Wind Report (e.g., PK WND 31037/0438)
+    else if (/^PK WND \d{5}\/\d{4}$/.test(input)) {
+        let match = input.match(/^PK WND (\d{3})(\d{2})\/(\d{4})$/);
+        let direction = match[1]; // Wind direction in degrees
+        let speed = match[2]; // Peak wind speed in knots
+        let time = match[3].slice(0, 2) + ":" + match[3].slice(2); // Convert to HH:MM UTC format
+
+        output = `Peak Wind Report: Wind gusted to ${speed} knots from ${direction}° at ${time} UTC.`;
+    }
+
+    // Vicinity Weather (e.g., VCSH, VCTS, VCFG)
+    else if (/^VC([A-Z]{2,4})$/.test(input)) {
+        const weatherCodes = {
+            "SH": "Showers",
+            "TS": "Thunderstorms",
+            "FG": "Fog",
+            "RA": "Rain",
+            "SN": "Snow",
+            "FZRA": "Freezing Rain",
+            "FZDZ": "Freezing Drizzle"
+        };
+
+        let match = input.match(/^VC([A-Z]{2,4})$/);
+        let event = weatherCodes[match[1]] || match[1]; // Defaults to raw input if unknown
+
+        output = `Vicinity ${event}`;
+    }
+
+    // Visibility (Statute Miles) - Handles whole numbers and decimals
+    else if (/^\d+(\.\d+)?SM$/.test(input)) {
+        output = `Visibility: ${input.replace("SM", "")} statute miles`; // Keep original format
+    }
+
+    // Visibility (Fractions) - Keeps fraction format
+    else if (/^\d*\s?\d?\/\dSM$/.test(input)) {
+        output = `Visibility: ${input.replace("SM", "")} statute miles`; // Keep fraction format
+    }
+
+    // Weather Phenomena with Intensity and Timing (e.g., +TSRA, -FZDZ, RAB25, TSE45)
+    else if (/^(\+|-)?(TS|SH|RA|SN|FG|BR|HZ|GR|IC|PL|UP|SG|FZRA|FZDZ)+(B|E)?(\d{2})?$/i.test(input)) {
+        const weatherCodes = {
+            "TS": "Thunderstorm",
+            "SH": "Showers",
+            "RA": "Rain",
+            "SN": "Snow",
+            "FG": "Fog",
+            "BR": "Mist",
+            "HZ": "Haze",
+            "GR": "Hail",
+            "IC": "Ice Crystals",
+            "PL": "Ice Pellets",
+            "UP": "Unknown Precipitation",
+            "SG": "Snow Grains",
+            "FZRA": "Freezing Rain",
+            "FZDZ": "Freezing Drizzle"
+        };
+
+        let matches = input.match(/^(\+|-)?((?:TS|SH|RA|SN|FG|BR|HZ|GR|IC|PL|UP|SG|FZRA|FZDZ)+)(B|E)?(\d{2})?$/i);
+        let intensity = matches[1] === "+" ? "Heavy " : matches[1] === "-" ? "Light " : "";
+
+        let rawEventCode = matches[2].toUpperCase(); // Always uppercase for lookup
+        let timeType = matches[3] === "B" ? "Began" : matches[3] === "E" ? "Ended" : "";
+        let time = matches[4] ? ` at ${matches[4]} minutes past the hour` : "";
+
+        // Match codes sequentially without substring matches
+        let eventDescription = [];
+        let regexCodes = /(TS|SH|RA|SN|FG|BR|HZ|GR|IC|PL|UP|SG|FZRA|FZDZ)/g;
+        let codeMatch;
+        while ((codeMatch = regexCodes.exec(rawEventCode)) !== null) {
+            eventDescription.push(weatherCodes[codeMatch[1]]);
+        }
+
+        let eventString = eventDescription.join(" with ");
+        output = `${intensity}${eventString}${timeType ? ` ${timeType}` : ""}${time}`;
+    }
+
+    // Weather Events with Start/End Times (e.g., TSB25, RAE15, SHB20, FGB05)
+        else if (/^(TS|SH|RA|SN|FG|BR|HZ|GR|IC|PL|UP|SG|FZRA|FZDZ)(B|E)\d{2}$/i.test(input)) {
+        const eventCodes = {
+            "TS": "Thunderstorm",
+            "SH": "Showers",
+            "RA": "Rain",
+            "SN": "Snow",
+            "FG": "Fog",
+            "BR": "Mist",
+            "HZ": "Haze",
+            "GR": "Hail",
+            "IC": "Ice Crystals",
+            "PL": "Ice Pellets",
+            "UP": "Unknown Precipitation",
+            "SG": "Snow Grains",
+            "FZRA": "Freezing Rain",
+            "FZDZ": "Freezing Drizzle"
+        };
+
+        let event = eventCodes[input.match(/^(TS|SH|RA|SN|FG|BR|HZ|GR|IC|PL|UP|SG|FZRA|FZDZ)/i)[1]] || "Unknown Event";
+        let eventType = input[2] === "B" ? "Began" : "Ended";
+        let time = input.slice(3);
+
+        output = `${event} ${eventType} at ${time} minutes past the hour`;
+    }
+
+    // Overhead (OHD)
+    else if (input === "OHD") {
+        output = "Overhead (e.g., clouds, storm, or weather occurring above station)";
+    }
+
+    // Precipitation Accumulation (6RRRR)
+    else if (/^6\d{4}$/.test(input)) {
+        let precip = (parseInt(input.slice(1, 5)) / 100).toFixed(2);
+        output = `Precipitation in last 6 hours: ${precip} inches`;
+    }
+
+    // Snowfall Rate (7RRRR)
+    else if (/^7\d{4}$/.test(input)) {
+        let snowfall = (parseInt(input.slice(1, 5)) / 100).toFixed(2);
+        output = `Snowfall in last hour: ${snowfall} inches`;
+    }
+
+    // TX/TN – Maximum and Minimum Temperature Forecasts
+    else if (/^TXM?\d{2,3}\/\d{4}Z$/.test(input) || /^TNM?\d{2,3}\/\d{4}Z$/.test(input)) {
+        let type = input.startsWith("TX") ? "Max Temp" : "Min Temp";
+        
+        let tempPart = input.split("/")[0].slice(2); // Extract everything after TX/TN
+        let time = input.split("/")[1].replace("Z", ""); // Extract time and remove 'Z'
+
+        let temp = tempPart.includes("M") ? `-${tempPart.replace("M", "")}` : tempPart; // Handle negative values
+
+        output = `${type}: ${temp}°C at ${time}Z`;
+    }
+
+    // Wind Shear (WS)
+    else if (/^WS\d{3}\/\d{2,3}KT$/.test(input)) {
+        let altitude = parseInt(input.slice(2, 5)) * 100;
+        let windSpeed = parseInt(input.match(/\/(\d{2,3})KT/)[1]);
+        output = `Wind Shear at ${altitude} ft: ${windSpeed} knots`;
+    }
+
+    // Temporary Changes (TEMPO)
+    else if (/^TEMPO \d{2,4}KT$/.test(input)) {
+        let windChange = input.match(/TEMPO (\d{2,4})KT/)[1];
+        output = `Temporary wind change to ${windChange} knots`;
+    }
+
+    // 1sTTT – 6-hourly Max Temperature
+    else if (/^1[01]\d{3}$/.test(input)) {
+        let sign = input[1] === "0" ? "+" : "-";
+        let temp = (parseInt(input.slice(2, 5)) / 10).toFixed(1);
+        output = `6-hour Max Temp: ${sign}${temp}°C`;
+    } 
+    
+    // 2sTTT – 6-hourly Min Temperature
+    else if (/^2[01]\d{3}$/.test(input)) {
+        let sign = input[1] === "0" ? "+" : "-";
+        let temp = (parseInt(input.slice(2, 5)) / 10).toFixed(1);
+        output = `6-hour Min Temp: ${sign}${temp}°C`;
+    } 
+    
+    // 4sXXXsNNN – 24-hour Max/Min Temperature
+    else if (/^4[01]\d{3}[01]\d{3}$/.test(input)) {
+        let match = input.match(/^4([01]\d{3})([01]\d{3})$/);
+        if (match) {
+            let signMax = match[1][0] === "0" ? "+" : "-";
+            let maxTemp = (parseInt(match[1].slice(1)) / 10).toFixed(1);
+            let signMin = match[2][0] === "0" ? "+" : "-";
+            let minTemp = (parseInt(match[2].slice(1)) / 10).toFixed(1);
+            output = `24-hour Max/Min Temp: ${signMax}${maxTemp}°C to ${signMin}${minTemp}°C`;
+        }
+    }
+ 
+    
+    // 4/SSS – Snow Depth in inches
+    else if (/^4\/\d{3}$/.test(input)) {
+        let snowDepth = parseInt(input.slice(2, 5));
+        output = `Snow Depth: ${snowDepth} inches`;
+    } 
+    
+    // 5aPPP – 3-hourly Pressure Tendency
+    else if (/^5[0-8]\d{3}$/.test(input)) {
+        const tendencyCodes = {
+            "0": "Increasing, then decreasing",
+            "1": "Increasing, then steady OR increasing more slowly",
+            "2": "Increasing steadily or unsteadily",
+            "3": "Decreasing or steady, then increasing OR increasing more rapidly",
+            "4": "No change (steady pressure)",
+            "5": "Decreasing, then increasing OR increasing, then decreasing",
+            "6": "Decreasing, then steady OR decreasing more slowly",
+            "7": "Decreasing steadily or unsteadily",
+            "8": "Steady or increasing, then decreasing OR decreasing more rapidly"
+        };
+
+        let trend = tendencyCodes[input[1]] || "Invalid Trend Code";
+        let pressureChange = (parseInt(input.slice(2, 5)) / 10).toFixed(1);
+        output = `Trend: ${trend}\nPressure Change: ${pressureChange} hPa over 3 hours`;
+    } 
+
+    // 933RRR – Water Equivalent of Snow
+    else if (/^933\d{3}$/.test(input)) {
+        let waterEquivalent = (parseInt(input.slice(3, 6)) / 10).toFixed(1);
+        output = `Water Equivalent of Snow: ${waterEquivalent} inches`;
+    } 
+    
+    // 98mmm – Minutes of Sunshine (Previous Calendar Day)
+    else if (/^98\d{3}$/.test(input)) {
+        let sunshineMinutes = parseInt(input.slice(2, 5));
+        output = `Minutes of Sunshine (Yesterday): ${sunshineMinutes} minutes`;
+    } 
+
+    else if (input.startsWith("TAF")) {
+        output = "Terminal Aerodrome Forecast";
+        if (input.startsWith("TAF AMD")) {
+            output += " (Amended Forecast)";
+        } else if (input.startsWith("TAF COR")) {
+            output += " (Corrected Forecast)";
+        }
+    }
+
+    // YYGGggZ – Date/Time of Forecast Origin Group
+    else if (/^\d{6}Z$/.test(input)) {
+        let day = input.slice(0, 2);
+        let hour = input.slice(2, 4);
+        let minute = input.slice(4, 6);
+        output = `Forecast Origin: ${day}th at ${hour}:${minute} UTC`;
+    }
+
+    // VRBffGfmfmKT – Variable Wind Group
+    else if (/^VRB\d{2}G?\d{0,2}KT$/.test(input)) {
+        let match = input.match(/^VRB(\d{2})G?(\d{0,2})?KT$/);
+        let windSpeed = match[1];
+        let gusts = match[2] ? `, gusting to ${match[2]} knots` : "";
+        output = `Variable Wind at ${windSpeed} knots${gusts}`;
+    }
+
+    // Y1Y1G1G1/Y2Y2G2G2 – Valid Period
+    else if (/^\d{4}\/\d{4}$/.test(input)) {
+        let startDay = input.slice(0, 2);
+        let startHour = input.slice(2, 4);
+        let endDay = input.slice(5, 7);
+        let endHour = input.slice(7, 9);
+        output = `Valid Period: From ${startDay}th at ${startHour} UTC to ${endDay}th at ${endHour} UTC`;
+    }
+
+    // dddffGfmfmKT – Wind Group
+    else if (/^\d{3}\d{2}G?\d{0,2}KT$/.test(input)) {
+        let match = input.match(/(\d{3})(\d{2})G?(\d{0,2})?KT/);
+        let windDir = match[1];
+        let windSpeed = match[2];
+        let gusts = match[3] ? `, gusting to ${match[3]} knots` : "";
+        output = `Wind: ${windDir}° at ${windSpeed} knots${gusts}`;
+    }
+
+    // VVVV w’w’ or NSW – Significant Weather Group
+    else if (/^(NSW|\d{4} \w{2})$/.test(input)) {
+        output = input.startsWith("NSW") ? "No Significant Weather" : `Visibility: ${input.slice(0, 4)} meters with ${input.slice(5)}`;
+    }
+
+    // NsNsNshshshs or VVhshshs or SKC – Cloud and Vertical Obscuration Groups
+    else if (/^(VV\d{3}|SKC|BKN\d{3}|FEW\d{3}|OVC\d{3})$/.test(input)) {
+        let cloudTypes = {
+            "SKC": "Sky Clear",
+            "VV": "Vertical Visibility",
+            "BKN": "Broken Clouds",
+            "FEW": "Few Clouds",
+            "OVC": "Overcast Clouds"
+        };
+        let type = input.slice(0, 3);
+        let altitude = input.length > 3 ? parseInt(input.slice(3)) * 100 : "";
+        output = cloudTypes[type] ? `${cloudTypes[type]} at ${altitude} feet` : "Unknown Cloud Group";
+    }
+
+    // WShwshwshws/dddftKT – Non-Convective LLWS Group
+    else if (/^WS\d{3}\/\d{2}KT$/.test(input)) {
+        let match = input.match(/^WS(\d{3})\/(\d{2})KT$/);
+        let shearHeight = match[1];
+        let shearSpeed = match[2];
+        output = `Low-Level Wind Shear at ${shearHeight} feet, ${shearSpeed} KT`;
+    }
+
+    // TTGGgg – Forecast Change Indicator Group
+    else if (/^\d{2}\d{4}$/.test(input)) {
+        let timeCode = input.slice(2);
+        let hours = timeCode.slice(0, 2);
+        let minutes = timeCode.slice(2, 4);
+        output = `Forecast Change Indicator at ${hours}:${minutes} UTC`;
+    }
+
+    // FMY1Y1GGgg – From Group
+    else if (/^FM\d{6}$/.test(input)) {
+        let day = input.slice(2, 4);
+        let hour = input.slice(4, 6);
+        output = `Significant Change Begins: ${day}th at ${hour}:00 UTC`;
+    }
+
+    // TEMPO Y1Y1GG/YeYeGeGe – Temporary Group
+    else if (/^TEMPO \d{4}\/\d{4}$/.test(input)) {
+        let startDay = input.slice(6, 8);
+        let startHour = input.slice(8, 10);
+        let endDay = input.slice(11, 13);
+        let endHour = input.slice(13, 15);
+        output = `Temporary Changes Expected: ${startDay}th at ${startHour} UTC to ${endDay}th at ${endHour} UTC`;
+    }
+
+    // PROB30 Y1Y1GG/YeYeGeGe – Probability Group
+    else if (/^PROB30 \d{4}\/\d{4}$/.test(input)) {
+        let startDay = input.slice(7, 9);
+        let startHour = input.slice(9, 11);
+        let endDay = input.slice(12, 14);
+        let endHour = input.slice(14, 16);
+        output = `30% Probability of Changes: ${startDay}th at ${startHour} UTC to ${endDay}th at ${endHour} UTC`;
+    }
+    
+            else {
+        output = "Invalid code :( Break up the phrase or try another";
+    }
+
+    // Display output
+    document.getElementById("output").innerText = output;
+    document.getElementById("abbreviation").focus(); // Keeps input field selected
+    
+}
+
+// Enable pressing Enter for automatic decoding
+document.getElementById("abbreviation").addEventListener("keypress", function(event) {
+    if (event.key === "Enter") {
+        decodeMETARCode();
+    }
+});
+</script>
+
+<!-- Info button (bottom center) -->
+<button
+  id="infoBtn"
+  class="info-btn-bottom"
+  type="button"
+  aria-controls="footnote"
+  aria-expanded="false"
+  onclick="(function(){
+    var n = document.getElementById('footnote');
+    var nowHidden = n.classList.toggle('is-hidden');
+    document.getElementById('infoBtn').setAttribute('aria-expanded', String(!nowHidden));
+  })()"
+>
+  Info
+</button>
+
+<!-- Footnote (hidden by default) -->
+<div id="footnote" class="fixed-footnote is-hidden">
+  Decodes Most METAR, TAF, Chart Supplement, and General Abbreviations
+</div>
+
+
+<script>
+  // Toggle the bottom footnote when "Info" is clicked
+  document.addEventListener('DOMContentLoaded', function () {
+    const btn  = document.getElementById('infoBtn');
+    const note = document.getElementById('footnote');
+    if (!btn || !note) return;
+
+    btn.type = 'button'; // prevents form-style submit behavior
+    btn.addEventListener('click', function (e) {
+      e.preventDefault();
+      const nowHidden = note.classList.toggle('is-hidden');
+      btn.setAttribute('aria-expanded', String(!nowHidden));
+      // console.log('Info toggled. Hidden:', nowHidden);
+    });
+  });
+</script>
+
+<script>
+let minuteTimer = null;
+
+function pad(n){ return n.toString().padStart(2,'0'); }
+
+function checkEnter(event) {
+  if (event.key === "Enter") {
+    decodeMETARCode();
+  }
+}
+
+function updateTime() {
+  const now = new Date();
+
+  // Zulu (UTC) — HH:MMZ
+  const zulu = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}Z`;
+
+  // Local — 12-hour, no seconds, auto-DST
+  const local = new Intl.DateTimeFormat([], {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZoneName: 'short'
+  }).format(now);
+
+  const el = document.getElementById('timeDisplay');
+  if (el) el.textContent = `${zulu} | ${local}`;
+}
+
+// Schedule the next tick exactly at the top of the next minute
+function scheduleNextMinuteTick() {
+  clearTimeout(minuteTimer);
+  const now = new Date();
+  const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+  minuteTimer = setTimeout(function tick() {
+    updateTime();                 // update exactly at :00
+    scheduleNextMinuteTick();     // then schedule the next one
+  }, Math.max(0, msUntilNextMinute));
+}
+
+// Start when visible; stop when hidden (battery-friendly)
+function startClock() {
+  updateTime();              // immediate
+  scheduleNextMinuteTick();  // align to next minute boundary
+}
+function stopClock() {
+  clearTimeout(minuteTimer);
+  minuteTimer = null;
+}
+
+// Toggle between time bar and footnote
+function toggleInfo() {
+  const foot = document.getElementById('footnote');
+  const timeBar = document.getElementById('timeBar');
+  const btn = document.getElementById('infoBtn');
+
+  const footnoteIsHidden = foot.classList.contains('is-hidden');
+  if (footnoteIsHidden) {
+    foot.classList.remove('is-hidden');
+    timeBar.classList.add('is-hidden');
+    btn.setAttribute('aria-expanded', 'true');
+  } else {
+    foot.classList.add('is-hidden');
+    timeBar.classList.remove('is-hidden');
+    btn.setAttribute('aria-expanded', 'false');
+  }
+}
+
+// Visibility + focus handlers to react instantly to time changes
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopClock();
+  } else {
+    startClock();            // immediate resync when you come back
+  }
+});
+window.addEventListener('focus', () => {
+  // If system time/timezone changed while away, snap-update now
+  startClock();
+});
+window.addEventListener('pageshow', () => {
+  // Handles back/forward cache restores
+  startClock();
+});
+
+// Initial state
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('footnote')?.classList.add('is-hidden');
+  document.getElementById('timeBar')?.classList.remove('is-hidden');
+  startClock();
+});
+</script>
+
+</body>
+</html>
